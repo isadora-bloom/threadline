@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,6 @@ import { CheckCircle, Eye, EyeOff } from 'lucide-react'
 
 function ResetForm() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const supabase = createClient()
 
   const [password, setPassword] = useState('')
