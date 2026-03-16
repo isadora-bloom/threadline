@@ -142,6 +142,7 @@ export default function LoginPage() {
           <p className="mt-2 text-sm text-slate-500 max-w-xs mx-auto">
             Case intelligence for the people who refuse to give up.
           </p>
+          <p className="mt-1 text-xs text-slate-300 font-mono">key: ...{supabaseKey?.slice(-12)}</p>
         </div>
 
         <Card>
