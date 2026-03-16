@@ -12,6 +12,8 @@ import { Mail, CheckCircle, Eye, EyeOff } from 'lucide-react'
 type Mode = 'password' | 'magic' | 'reset'
 
 export default function LoginPage() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   const supabase = createClient()
   const [mode, setMode] = useState<Mode>('password')
   const [email, setEmail] = useState('')
@@ -109,6 +111,21 @@ export default function LoginPage() {
               </button>
             </CardContent>
           </Card>
+        </div>
+      </div>
+    )
+  }
+
+  if (!supabaseUrl || !supabaseKey) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md text-center">
+          <p className="text-red-600 font-mono text-sm">
+            Missing env vars — redeploy with NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY set in Vercel.
+          </p>
+          <p className="text-slate-400 text-xs mt-2">
+            URL: {supabaseUrl ? '✓' : '✗ missing'} · Key: {supabaseKey ? `✓ (${supabaseKey.slice(-8)})` : '✗ missing'}
+          </p>
         </div>
       </div>
     )
