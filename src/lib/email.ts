@@ -1,7 +1,10 @@
 import { Resend } from 'resend'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
 const FROM = process.env.EMAIL_FROM ?? 'Threadline <noreply@threadline.app>'
+
+function getResend() {
+  return new Resend(process.env.RESEND_API_KEY)
+}
 
 export async function sendInvitationEmail({
   to,
@@ -16,7 +19,7 @@ export async function sendInvitationEmail({
   invitedBy: string
   acceptUrl: string
 }) {
-  return resend.emails.send({
+  return getResend().emails.send({
     from: FROM,
     to,
     subject: `You've been invited to ${caseName} on Threadline`,
@@ -60,7 +63,7 @@ export async function sendCaseMagicLink({
   to: string
   magicLink: string
 }) {
-  return resend.emails.send({
+  return getResend().emails.send({
     from: FROM,
     to,
     subject: 'Your Threadline sign-in link',
