@@ -22,6 +22,8 @@ export default async function CaseSettingsPage({
 
   if (!roleData) notFound()
 
+  const userRole = (roleData as { role: string }).role
+
   const { data: caseData } = await supabase
     .from('cases')
     .select('*')
@@ -59,7 +61,7 @@ export default async function CaseSettingsPage({
         caseData={caseData}
         teamMembers={teamMembers ?? []}
         tokens={tokens ?? []}
-        userRole={roleData.role}
+        userRole={userRole}
         currentUserId={user.id}
         caseId={caseId}
       />

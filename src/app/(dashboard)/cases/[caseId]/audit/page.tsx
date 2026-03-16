@@ -23,8 +23,9 @@ export default async function AuditPage({
 
   if (!roleData) notFound()
 
+  const role = (roleData as { role: string }).role
   const allowedRoles = ['lead_investigator', 'legal', 'admin']
-  if (!allowedRoles.includes(roleData.role)) {
+  if (!allowedRoles.includes(role)) {
     return (
       <div className="p-6 text-center py-16">
         <Lock className="h-12 w-12 text-slate-300 mx-auto mb-3" />

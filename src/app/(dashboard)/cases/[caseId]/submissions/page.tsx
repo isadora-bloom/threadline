@@ -28,6 +28,8 @@ export default async function SubmissionsPage({
 
   if (!roleData) notFound()
 
+  const userRole = (roleData as { role: string }).role
+
   // Fetch all submissions with counts
   const { data: submissions } = await supabase
     .from('submissions')
@@ -97,7 +99,7 @@ export default async function SubmissionsPage({
         caseId={caseId}
         initialTab={tab ?? 'priority'}
         queueStats={{ untriaged, in_review: inReview, reviewed_today: reviewedToday }}
-        userRole={roleData.role}
+        userRole={userRole}
       />
     </div>
   )

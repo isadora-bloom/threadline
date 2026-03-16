@@ -22,8 +22,9 @@ export default async function ReviewDashboardPage({
 
   if (!roleData) notFound()
 
+  const userRole = (roleData as { role: string }).role
   // Only lead_investigator and admin can view this
-  if (!['lead_investigator', 'admin'].includes(roleData.role)) {
+  if (!['lead_investigator', 'admin'].includes(userRole)) {
     return (
       <div className="p-6 max-w-2xl mx-auto text-center py-20">
         <p className="text-slate-500">You need lead investigator or admin access to view the review dashboard.</p>

@@ -26,7 +26,8 @@ export default async function ExportsPage({
 
   if (!roleData) notFound()
 
-  const canExport = ['lead_investigator', 'export_only', 'admin'].includes(roleData.role)
+  const userRole = (roleData as { role: string }).role
+  const canExport = ['lead_investigator', 'export_only', 'admin'].includes(userRole)
 
   // Fetch existing exports
   const { data: exports } = await supabase

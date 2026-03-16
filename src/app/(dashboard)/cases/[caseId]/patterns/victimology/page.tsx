@@ -24,9 +24,10 @@ export default async function VictimologyPage({
 
   if (!roleData) notFound()
 
+  const userRole = (roleData as { role: string }).role
   // Only reviewer+ can access
   const reviewerRoles = ['reviewer', 'lead_investigator', 'legal', 'export_only', 'admin']
-  if (!reviewerRoles.includes(roleData.role)) notFound()
+  if (!reviewerRoles.includes(userRole)) notFound()
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">

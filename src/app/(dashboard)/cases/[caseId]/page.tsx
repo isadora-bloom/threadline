@@ -54,6 +54,8 @@ export default async function CaseDashboardPage({
 
   if (!roleData) notFound()
 
+  const userRole = (roleData as { role: string }).role
+
   // Fetch counts
   const [submissionsRes, entitiesRes, unreviewedRes, notablePatternFlagsRes] = await Promise.all([
     supabase.from('submissions').select('id', { count: 'exact', head: true }).eq('case_id', caseId),
@@ -103,7 +105,7 @@ export default async function CaseDashboardPage({
               <Badge variant={caseData.status === 'active' ? 'success' as never : 'muted' as never}>
                 {labelForCaseStatus(caseData.status)}
               </Badge>
-              <Badge variant="outline">{roleData.role.replace('_', ' ')}</Badge>
+              <Badge variant="outline">{userRole.replace('_', ' ')}</Badge>
             </div>
             <h1 className="text-2xl font-bold text-slate-900">{caseData.title}</h1>
             {caseData.jurisdiction && (
@@ -209,7 +211,7 @@ export default async function CaseDashboardPage({
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Public submission links</CardTitle>
-              {(roleData.role === 'lead_investigator' || roleData.role === 'admin') && (
+              {(userRole === 'lead_investigator' || userRole === 'admin') && (
                 <GenerateTokenButton caseId={caseId} />
               )}
             </div>
