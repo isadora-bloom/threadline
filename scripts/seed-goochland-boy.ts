@@ -751,8 +751,6 @@ async function main() {
       grade: 'strong',
       score: 85,
       reviewer_status: 'unreviewed',
-      generated_by: 'system',
-      created_by: userId,
     },
     {
       case_id: caseId,
@@ -768,8 +766,6 @@ async function main() {
       grade: 'notable',
       score: 70,
       reviewer_status: 'unreviewed',
-      generated_by: 'system',
-      created_by: userId,
     },
     {
       case_id: caseId,
@@ -785,8 +781,6 @@ async function main() {
       grade: 'notable',
       score: 65,
       reviewer_status: 'unreviewed',
-      generated_by: 'system',
-      created_by: userId,
     },
     {
       case_id: caseId,
@@ -801,8 +795,6 @@ async function main() {
       grade: 'notable',
       score: 60,
       reviewer_status: 'unreviewed',
-      generated_by: 'system',
-      created_by: userId,
     },
   ]
 
