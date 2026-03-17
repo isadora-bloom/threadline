@@ -76,7 +76,13 @@ Return a JSON object with this exact structure:
       "extracted_text": "the specific claim or piece of information, quoted or closely paraphrased from the source",
       "claim_type": "one of: sighting | identifier | association | statement | interpretation | official | behavioral | physical_description | forensic_countermeasure | scene_staging | disposal_method",
       "confidence": "one of: low | medium | high",
-      "notes": "any important caveats about this claim, or null"
+      "notes": "any important caveats about this claim, or null",
+      "tags": [
+        {
+          "tag": "lowercase-hyphenated tag name, e.g. licence-plate, military-marking, clothing-detail, phone-number, vehicle-description",
+          "tag_type": "one of: identifier | physical | behavioral | geographic | temporal | generic"
+        }
+      ]
     }
   ],
   "investigator_notes": "anything else worth flagging to the investigator — metadata, timestamp visibility, account info, red flags, or null"

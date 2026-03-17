@@ -13,6 +13,7 @@ import { CorridorView } from '@/components/patterns/CorridorView'
 import { SocialNetworkGraph } from '@/components/patterns/SocialNetworkGraph'
 import { CaseLinkageView } from '@/components/patterns/CaseLinkageView'
 import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads'
+import { ResearchTaskList } from '@/components/research/ResearchTaskList'
 import { useToast } from '@/components/ui/use-toast'
 import { useParams } from 'next/navigation'
 import {
@@ -27,6 +28,7 @@ import {
   CheckCircle,
   AlertTriangle,
   Sparkles,
+  Microscope,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
@@ -247,7 +249,7 @@ export default function PatternIntelligencePage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className={`grid w-full max-w-2xl ${canRunAnalysis ? 'grid-cols-6' : 'grid-cols-5'}`}>
+        <TabsList className={`grid w-full max-w-3xl ${canRunAnalysis ? 'grid-cols-7' : 'grid-cols-6'}`}>
           <TabsTrigger value="flags" className="text-xs">
             <Flag className="h-3.5 w-3.5 mr-1" />
             Flags
@@ -279,6 +281,10 @@ export default function PatternIntelligencePage() {
             <Sparkles className="h-3.5 w-3.5 mr-1" />
             Threads
           </TabsTrigger>
+          <TabsTrigger value="research" className="text-xs">
+            <Microscope className="h-3.5 w-3.5 mr-1" />
+            Research
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="flags" className="mt-4">
@@ -305,6 +311,10 @@ export default function PatternIntelligencePage() {
 
         <TabsContent value="threads" className="mt-4">
           <InvestigativeThreads caseId={caseId} canGenerate={canRunAnalysis} />
+        </TabsContent>
+
+        <TabsContent value="research" className="mt-4">
+          <ResearchTaskList caseId={caseId} canManage={canRunAnalysis} />
         </TabsContent>
       </Tabs>
     </div>

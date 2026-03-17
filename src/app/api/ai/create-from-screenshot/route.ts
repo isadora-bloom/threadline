@@ -6,6 +6,7 @@ interface ExtractedClaim {
   claim_type: string
   confidence: string
   notes?: string | null
+  tags?: Array<{ tag: string; tag_type: string }>
 }
 
 interface ExtractedEntity {
@@ -86,11 +87,11 @@ export async function POST(req: NextRequest) {
 
   const submissionId = submission.id
 
-  // Create claims
+  // Create claims and their tags
   if (claims?.length) {
     const claimRows = claims.map((c: ExtractedClaim) => ({
       submission_id: submissionId,
-      case_id: caseId,
+      original_submission_id: submissionId,
       extracted_text: c.extracted_text,
       claim_type: c.claim_type as never,
       source_confidence: c.confidence as never,
@@ -101,8 +102,30 @@ export async function POST(req: NextRequest) {
       created_by: user.id,
     }))
 
-    const { error: claimError } = await supabase.from('claims').insert(claimRows)
-    if (claimError) console.error('Claims insert error:', claimError)
+    const { data: insertedClaims, error: claimError } = await supabase
+      .from('claims')
+      .insert(claimRows)
+      .select('id')
+    if (claimError) {
+      console.error('Claims insert error:', claimError)
+    } else if (insertedClaims?.length) {
+      // Save tags for each claim
+      const tagRows: Array<{ claim_id: string; case_id: string; tag: string; tag_type: string; source: string; created_by: string }> = []
+      claims.forEach((c: ExtractedClaim, i: number) => {
+        const claimId = insertedClaims[i]?.id
+        if (claimId && c.tags?.length) {
+          for (const t of c.tags) {
+            if (t.tag?.trim()) {
+              tagRows.push({ claim_id: claimId, case_id: caseId, tag: t.tag.trim().toLowerCase(), tag_type: t.tag_type ?? 'generic', source: 'ai', created_by: user.id })
+            }
+          }
+        }
+      })
+      if (tagRows.length) {
+        const { error: tagErr } = await supabase.from('claim_tags').insert(tagRows)
+        if (tagErr) console.error('Tag insert error:', tagErr.message)
+      }
+    }
   }
 
   // Create entities and link them
@@ -142,6 +165,12 @@ export async function POST(req: NextRequest) {
       }
     }
   }
+
+  // Trigger corroboration analysis in background (non-blocking)
+  fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? ''}/api/submissions/${submissionId}/corroborate`, {
+    method: 'POST',
+    headers: { Cookie: req.headers.get('cookie') ?? '' },
+  }).catch(err => console.error('Corroboration trigger failed:', err))
 
   return NextResponse.json({ submissionId })
 }
