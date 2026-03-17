@@ -100,12 +100,17 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
     mutationFn: async () => {
       const res = await fetch(`/api/research/${task.id}/run`, { method: 'POST' })
       if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error ?? 'Run failed')
+        let msg = 'Run failed'
+        try { const err = await res.json(); msg = err.error ?? msg } catch {}
+        throw new Error(msg)
       }
       return res.json()
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
+    },
+    onError: () => {
+      // Refetch so the UI reflects whatever status the server left the task in
       queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
     },
   })
