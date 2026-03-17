@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -70,6 +70,7 @@ interface ResearchTask {
   error_message: string | null
   created_at: string
   completed_at: string | null
+  started_at: string | null
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -95,11 +96,26 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(task.status === 'awaiting_review')
   const [logOpen, setLogOpen] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Auto-open when results arrive after a run
   useEffect(() => {
     if (task.status === 'awaiting_review') setOpen(true)
   }, [task.status])
+
+  // Live elapsed timer while running
+  useEffect(() => {
+    if (task.status === 'running' && task.started_at) {
+      const tick = () => setElapsed(Math.floor((Date.now() - new Date(task.started_at!).getTime()) / 1000))
+      tick()
+      timerRef.current = setInterval(tick, 1000)
+    } else {
+      setElapsed(0)
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [task.status, task.started_at])
 
   const runMutation = useMutation({
     mutationFn: async (deep = false) => {
@@ -121,6 +137,17 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
     onError: () => {
       queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
     },
+  })
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      await fetch(`/api/research/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'queued' }),
+      })
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] }),
   })
 
   const completeMutation = useMutation({
@@ -162,6 +189,24 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
+              {task.status === 'running' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-blue-500 tabular-nums">
+                    {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
+                  </span>
+                  {elapsed > 120 && canRun && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[11px] text-slate-400 hover:text-red-600"
+                      onClick={e => { e.stopPropagation(); resetMutation.mutate() }}
+                      disabled={resetMutation.isPending}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
+              )}
               {canRun && task.status === 'queued' && (
                 <Button
                   size="sm"
@@ -193,6 +238,34 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
 
         <CollapsibleContent>
           <div className="px-4 pb-4 space-y-4 border-t border-slate-100 pt-4">
+
+            {/* Running status */}
+            {task.status === 'running' && (
+              <div className={`flex items-start gap-2 rounded-lg p-3 ${elapsed > 120 ? 'bg-amber-50 border border-amber-200' : 'bg-blue-50 border border-blue-100'}`}>
+                <Loader2 className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 animate-spin ${elapsed > 120 ? 'text-amber-500' : 'text-blue-400'}`} />
+                <div className="space-y-1">
+                  <p className={`text-xs font-medium ${elapsed > 120 ? 'text-amber-800' : 'text-blue-700'}`}>
+                    {elapsed > 120 ? 'Taking longer than expected' : 'Research in progress'}
+                  </p>
+                  <p className={`text-[11px] ${elapsed > 120 ? 'text-amber-600' : 'text-blue-500'}`}>
+                    {elapsed > 120
+                      ? `Running for ${Math.floor(elapsed / 60)}m ${elapsed % 60}s. This may be a deep search with many rabbit holes, or it may be stuck. You can reset it to queued and re-run.`
+                      : 'Searching sources and following leads. Fast run typically completes in under 10s; deep mode can take up to 2 minutes.'}
+                  </p>
+                  {elapsed > 120 && canRun && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[11px] mt-1 border-amber-300 text-amber-700 hover:bg-amber-100"
+                      onClick={() => resetMutation.mutate()}
+                      disabled={resetMutation.isPending}
+                    >
+                      Reset to queued
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Findings */}
             {task.findings && (
