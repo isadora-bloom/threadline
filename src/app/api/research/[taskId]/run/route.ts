@@ -28,6 +28,13 @@ interface ResearchStep {
   followup_reason?: string
 }
 
+// Extract the first valid JSON object or array from a Claude response string
+function extractJson(text: string): unknown {
+  const match = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/)
+  if (!match) throw new Error('No JSON found in response')
+  return JSON.parse(match[0])
+}
+
 // Run all queries in a single round concurrently
 async function runSearchRound(queries: string[]): Promise<Map<string, SearchResult[]>> {
   const results = await Promise.all(queries.map(q => searchWeb(q)))
@@ -179,12 +186,11 @@ Return JSON (no markdown):
       })
       const block = resp.content.find(b => b.type === 'text')
       if (block?.type === 'text') {
-        const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
         try {
-          const parsed = JSON.parse(raw)
+          const parsed = extractJson(block.text) as Record<string, unknown>
           findings = parsed.findings ?? null
-          humanNextSteps = parsed.human_next_steps ?? []
-          confidenceSummary = parsed.confidence_summary ?? ''
+          humanNextSteps = (parsed.human_next_steps as unknown[]) ?? []
+          confidenceSummary = (parsed.confidence_summary as string) ?? ''
         } catch {
           confidenceSummary = block.text.slice(0, 500)
         }
@@ -233,8 +239,7 @@ Return ONLY a JSON array of ${QUERIES_PER_ROUND} search query strings. Most spec
     })
     const block = planResp.content.find(b => b.type === 'text')
     if (block?.type === 'text') {
-      const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-      currentQueries = JSON.parse(raw)
+      currentQueries = extractJson(block.text) as string[]
     }
   } catch {
     currentQueries = [task.question]
@@ -314,9 +319,8 @@ Maximum ${FOLLOWUPS_PER_ROUND} follow-ups. If nothing genuinely new surfaced, re
 
       const block = followupResp.content.find(b => b.type === 'text')
       if (block?.type === 'text') {
-        const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-        const parsed = JSON.parse(raw)
-        const followUps: Array<{ query: string; reason: string }> = parsed.follow_ups ?? []
+        const parsed = extractJson(block.text) as Record<string, unknown>
+        const followUps: Array<{ query: string; reason: string }> = (parsed.follow_ups as Array<{ query: string; reason: string }>) ?? []
 
         if (followUps.length === 0) break // Claude says we're done
 
@@ -386,12 +390,11 @@ Return JSON (no markdown):
     })
     const block = synthResp.content.find(b => b.type === 'text')
     if (block?.type === 'text') {
-      const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
       try {
-        const parsed = JSON.parse(raw)
+        const parsed = extractJson(block.text) as Record<string, unknown>
         findings = parsed.findings ?? null
-        humanNextSteps = parsed.human_next_steps ?? []
-        confidenceSummary = parsed.confidence_summary ?? ''
+        humanNextSteps = (parsed.human_next_steps as unknown[]) ?? []
+        confidenceSummary = (parsed.confidence_summary as string) ?? ''
 
         if (parsed.sources_consulted?.length) {
           for (const s of parsed.sources_consulted) {

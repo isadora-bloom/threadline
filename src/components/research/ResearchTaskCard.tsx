@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -95,6 +95,11 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(task.status === 'awaiting_review')
   const [logOpen, setLogOpen] = useState(false)
+
+  // Auto-open when results arrive after a run
+  useEffect(() => {
+    if (task.status === 'awaiting_review') setOpen(true)
+  }, [task.status])
 
   const runMutation = useMutation({
     mutationFn: async (deep = false) => {
