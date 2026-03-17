@@ -183,8 +183,9 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div className={`rounded-lg border ${task.status === 'awaiting_review' ? 'border-amber-200 bg-amber-50/30' : 'border-slate-200 bg-white'}`}>
-        {/* Header */}
-        <CollapsibleTrigger className="w-full text-left p-4">
+        {/* Header — asChild div so action buttons inside are not nested inside a <button> */}
+        <CollapsibleTrigger asChild>
+        <div className="w-full text-left p-4 cursor-pointer">
           <div className="flex items-start gap-3">
             <Microscope className="h-4 w-4 text-indigo-500 flex-shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
@@ -247,6 +248,7 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
               {open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
             </div>
           </div>
+        </div>
         </CollapsibleTrigger>
 
         <CollapsibleContent>
