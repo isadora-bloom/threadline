@@ -6,9 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "seed": "node scripts/seed.mjs",
+    "scrape:doe": "npx tsx scripts/scrape-doe-network.ts",
+    "import:doe": "npx tsx scripts/import-doe-network.ts",
+    "seed:goochland": "npx tsx scripts/seed-goochland-boy.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.79.0",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-alert-dialog": "^1.1.3",
     "@radix-ui/react-avatar": "^1.1.1",

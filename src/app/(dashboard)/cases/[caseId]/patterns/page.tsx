@@ -12,6 +12,7 @@ import { LinkScoreList } from '@/components/patterns/LinkScoreList'
 import { CorridorView } from '@/components/patterns/CorridorView'
 import { SocialNetworkGraph } from '@/components/patterns/SocialNetworkGraph'
 import { CaseLinkageView } from '@/components/patterns/CaseLinkageView'
+import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads'
 import { useToast } from '@/components/ui/use-toast'
 import { useParams } from 'next/navigation'
 import {
@@ -25,6 +26,7 @@ import {
   RefreshCw,
   CheckCircle,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
@@ -245,7 +247,7 @@ export default function PatternIntelligencePage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-5 w-full max-w-2xl">
+        <TabsList className={`grid w-full max-w-2xl ${canRunAnalysis ? 'grid-cols-6' : 'grid-cols-5'}`}>
           <TabsTrigger value="flags" className="text-xs">
             <Flag className="h-3.5 w-3.5 mr-1" />
             Flags
@@ -267,12 +269,16 @@ export default function PatternIntelligencePage() {
             <Users className="h-3.5 w-3.5 mr-1" />
             Network
           </TabsTrigger>
-          {(userRole === 'lead_investigator' || userRole === 'admin') && (
+          {canRunAnalysis && (
             <TabsTrigger value="cross-case" className="text-xs">
               <Layers className="h-3.5 w-3.5 mr-1" />
               Cross-Case
             </TabsTrigger>
           )}
+          <TabsTrigger value="threads" className="text-xs">
+            <Sparkles className="h-3.5 w-3.5 mr-1" />
+            Threads
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="flags" className="mt-4">
@@ -291,11 +297,15 @@ export default function PatternIntelligencePage() {
           <SocialNetworkGraph caseId={caseId} />
         </TabsContent>
 
-        {(userRole === 'lead_investigator' || userRole === 'admin') && (
+        {canRunAnalysis && (
           <TabsContent value="cross-case" className="mt-4">
             <CaseLinkageView caseId={caseId} />
           </TabsContent>
         )}
+
+        <TabsContent value="threads" className="mt-4">
+          <InvestigativeThreads caseId={caseId} canGenerate={canRunAnalysis} />
+        </TabsContent>
       </Tabs>
     </div>
   )

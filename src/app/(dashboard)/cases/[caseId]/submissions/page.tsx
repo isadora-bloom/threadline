@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { SmartQueue } from '@/components/submissions/SmartQueue'
+import { QuickCapture } from '@/components/submissions/QuickCapture'
 import { Inbox } from 'lucide-react'
 import type { NoveltyFlag } from '@/lib/types'
 
@@ -80,18 +81,21 @@ export default async function SubmissionsPage({
             {allSubmissions.length} total submissions
           </p>
         </div>
-        <a
-          href={`/cases/${caseId}/submissions/triage`}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
-        >
-          <Inbox className="h-4 w-4" />
-          Triage mode
-          {untriaged > 0 && (
-            <span className="ml-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-indigo-600 text-[10px] font-bold text-white px-1">
-              {untriaged}
-            </span>
-          )}
-        </a>
+        <div className="flex items-center gap-2">
+          <QuickCapture caseId={caseId} />
+          <a
+            href={`/cases/${caseId}/submissions/triage`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+          >
+            <Inbox className="h-4 w-4" />
+            Triage mode
+            {untriaged > 0 && (
+              <span className="ml-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-indigo-600 text-[10px] font-bold text-white px-1">
+                {untriaged}
+              </span>
+            )}
+          </a>
+        </div>
       </div>
 
       <SmartQueue

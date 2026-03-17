@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { CaseNav } from './CaseNav'
+import { QuickCapture } from '@/components/submissions/QuickCapture'
 import { useQuery } from '@tanstack/react-query'
 
 export function Sidebar() {
@@ -110,6 +111,11 @@ export function Sidebar() {
           </div>
           <span className="text-lg font-bold text-slate-900 tracking-tight">Threadline</span>
         </Link>
+      </div>
+
+      {/* Quick Capture */}
+      <div className="px-3 py-3 border-b border-slate-100">
+        <QuickCapture caseId={caseId} />
       </div>
 
       {/* Main navigation */}
