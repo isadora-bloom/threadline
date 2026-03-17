@@ -161,6 +161,18 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                   Run
                 </Button>
               )}
+              {canRun && ['failed', 'complete', 'awaiting_review'].includes(task.status) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-slate-500"
+                  disabled={runMutation.isPending}
+                  onClick={e => { e.stopPropagation(); runMutation.mutate() }}
+                >
+                  {runMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                  Re-run
+                </Button>
+              )}
               {open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
             </div>
           </div>

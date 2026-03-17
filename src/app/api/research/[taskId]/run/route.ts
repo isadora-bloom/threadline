@@ -87,6 +87,9 @@ export async function POST(
 
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (task.status === 'running') return NextResponse.json({ error: 'Already running' }, { status: 409 })
+  if (!['queued', 'failed', 'complete', 'awaiting_review'].includes(task.status)) {
+    return NextResponse.json({ error: 'Cannot run task in current state' }, { status: 409 })
+  }
 
   const { data: roleData } = await supabase
     .from('case_user_roles')
@@ -149,7 +152,7 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
   let currentQueries: string[] = []
   try {
     const planResp = await anthropic.messages.create({
-      model: 'claude-opus-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 600,
       messages: [{
         role: 'user',
@@ -208,7 +211,7 @@ Return ONLY a JSON array of ${QUERIES_PER_ROUND} search query strings. Most spec
     // Ask Claude: given what we found, what should we follow up on?
     try {
       const followupResp = await anthropic.messages.create({
-        model: 'claude-opus-4-6',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 500,
         messages: [{
           role: 'user',
@@ -267,11 +270,12 @@ Maximum ${FOLLOWUPS_PER_ROUND} follow-ups. If nothing genuinely new surfaced, re
 
   // ── Synthesis ───────────────────────────────────────────────────────────────
 
-  const synthesisPrompt = `You are an investigative research assistant working on a cold case. You have now completed ${MAX_ROUNDS} rounds of research, including follow-up threads on unexpected leads. Synthesize everything into a structured report.
+  const roundsRun = researchLog.length > 0 ? Math.max(...researchLog.map(l => l.round)) : 1
+  const synthesisPrompt = `You are an investigative research assistant working on a cold case. You have now completed ${roundsRun} round(s) of research, including follow-up threads on unexpected leads. Synthesize everything into a structured report.
 
 ${caseContext}
 
-ALL SEARCH RESULTS (${researchLog.length} queries across ${Math.max(...researchLog.map(l => l.round))} rounds):
+ALL SEARCH RESULTS (${researchLog.length} queries across ${roundsRun} rounds):
 ${allResultsText.join('\n\n')}
 
 INSTRUCTIONS:
@@ -308,33 +312,34 @@ Return JSON (no markdown):
 
   try {
     const synthResp = await anthropic.messages.create({
-      model: 'claude-opus-4-6',
+      model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       messages: [{ role: 'user', content: synthesisPrompt }],
     })
     const block = synthResp.content.find(b => b.type === 'text')
     if (block?.type === 'text') {
       const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-      const parsed = JSON.parse(raw)
-      findings = parsed.findings ?? null
-      humanNextSteps = parsed.human_next_steps ?? []
-      confidenceSummary = parsed.confidence_summary ?? ''
+      try {
+        const parsed = JSON.parse(raw)
+        findings = parsed.findings ?? null
+        humanNextSteps = parsed.human_next_steps ?? []
+        confidenceSummary = parsed.confidence_summary ?? ''
 
-      if (parsed.sources_consulted?.length) {
-        for (const s of parsed.sources_consulted) {
-          if (!sourcesConsulted.find(sc => sc.url === s.url && sc.name === s.name)) {
-            sourcesConsulted.push(s)
+        if (parsed.sources_consulted?.length) {
+          for (const s of parsed.sources_consulted) {
+            if (!sourcesConsulted.find(sc => sc.url === s.url && sc.name === s.name)) {
+              sourcesConsulted.push(s)
+            }
           }
         }
+      } catch {
+        // Synthesis response wasn't valid JSON — save the raw text as a summary
+        confidenceSummary = block.text.slice(0, 500)
       }
     }
   } catch (err) {
     console.error('Synthesis error:', err)
-    await supabase
-      .from('research_tasks')
-      .update({ status: 'failed', error_message: 'Synthesis failed', completed_at: new Date().toISOString() })
-      .eq('id', taskId)
-    return NextResponse.json({ error: 'Research synthesis failed' }, { status: 500 })
+    confidenceSummary = 'Synthesis step failed. Search log preserved below.'
   }
 
   // ── Save ────────────────────────────────────────────────────────────────────
@@ -354,16 +359,20 @@ Return JSON (no markdown):
     .select()
     .single()
 
-  if (updateErr) return NextResponse.json({ error: 'Failed to save results' }, { status: 500 })
+  if (updateErr) {
+    console.error('Save error:', updateErr)
+    return NextResponse.json({ error: 'Failed to save results' }, { status: 500 })
+  }
 
-  await supabase.from('review_actions').insert({
+  // Audit log — non-blocking, failure here must not break the response
+  supabase.from('review_actions').insert({
     actor_id: user.id,
     action: 'research_completed',
     target_type: 'case',
     target_id: task.case_id,
     case_id: task.case_id,
-    note: `Research completed: "${task.question}". ${researchLog.length} queries across ${Math.max(...researchLog.map(l => l.round))} rounds. Sources: ${sourcesConsulted.length}. Next steps: ${humanNextSteps.length}.`,
-  })
+    note: `Research completed: "${task.question}". ${researchLog.length} queries across ${roundsRun} rounds. Sources: ${sourcesConsulted.length}. Next steps: ${humanNextSteps.length}.`,
+  }).then(({ error }) => { if (error) console.warn('Audit log failed:', error.message) })
 
   return NextResponse.json({ task: updated })
 }

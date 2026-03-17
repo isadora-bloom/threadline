@@ -42,6 +42,7 @@ export default function PatternIntelligencePage() {
   const [activeTab, setActiveTab] = useState('flags')
   const [isRunningAnalysis, setIsRunningAnalysis] = useState(false)
   const [userRole, setUserRole] = useState<string | null>(null)
+  const [roleLoaded, setRoleLoaded] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -54,6 +55,7 @@ export default function PatternIntelligencePage() {
         .single()
         .then(({ data }) => {
           setUserRole(data?.role ?? null)
+          setRoleLoaded(true)
         })
     })
   }, [caseId, supabase])
@@ -249,6 +251,7 @@ export default function PatternIntelligencePage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
+        {roleLoaded && (
         <TabsList className={`grid w-full max-w-3xl ${canRunAnalysis ? 'grid-cols-7' : 'grid-cols-6'}`}>
           <TabsTrigger value="flags" className="text-xs">
             <Flag className="h-3.5 w-3.5 mr-1" />
@@ -286,6 +289,7 @@ export default function PatternIntelligencePage() {
             Research
           </TabsTrigger>
         </TabsList>
+        )}
 
         <TabsContent value="flags" className="mt-4">
           <PatternFlagList caseId={caseId} />
