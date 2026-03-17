@@ -182,6 +182,35 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
       const resp = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
+        tools: [{
+          name: 'submit_research_findings',
+          description: 'Submit structured research findings for this investigative question',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              confirmed: { type: 'array', items: { type: 'string' }, description: 'Facts you can confirm from knowledge — include the source or basis for each' },
+              probable: { type: 'array', items: { type: 'string' }, description: 'Reasonable inferences — include the reasoning and what would confirm each' },
+              unresolvable_without_human: { type: 'array', items: { type: 'string' }, description: 'Gaps that require a human to resolve — be specific about what action is needed' },
+              human_next_steps: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+                    action: { type: 'string', description: 'Specific action with enough detail to act on today' },
+                    target: { type: 'string', description: 'Exact institution, record group, database, or person' },
+                    rationale: { type: 'string', description: 'What this could unlock' },
+                  },
+                  required: ['priority', 'action', 'target', 'rationale'],
+                },
+              },
+              follow_up_questions: { type: 'array', items: { type: 'string' }, description: 'Specific new questions this research opened that warrant their own investigation' },
+              confidence_summary: { type: 'string', description: '2-3 sentences: what is now established, the key remaining uncertainty, and the single highest-priority next action' },
+            },
+            required: ['confirmed', 'probable', 'unresolvable_without_human', 'human_next_steps', 'follow_up_questions', 'confidence_summary'],
+          },
+        }],
+        tool_choice: { type: 'tool', name: 'submit_research_findings' },
         messages: [{
           role: 'user',
           content: `You are an obsessive investigative research analyst working cold cases. You never give vague summaries — you go deep, follow every thread, and surface specific actionable leads that investigators can actually pursue.
@@ -191,45 +220,32 @@ ${caseContext}
 RESEARCH QUESTION: ${task.question}
 ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}
 
-INSTRUCTIONS — read these carefully:
-1. Exhaust everything you know. Do not stop at surface-level facts. Dig into the specific mechanics, history, systems, and institutions relevant to this question.
+INSTRUCTIONS:
+1. Exhaust everything you know. Do not stop at surface-level facts.
 2. Be obsessively specific. Not "military records may exist" — but "National Archives Record Group 92 (Office of the Quartermaster General) holds property accountability records; laundry contract records for the 1950s are in Entry 1930 or adjacent entries."
-3. Distinguish clearly: things you can confirm from knowledge vs. things that are reasonable inferences vs. things that genuinely require a human to look up.
-4. Surface follow-up questions. Every piece of research opens new threads. List the specific sub-questions that this research raised — concrete things worth investigating next.
-5. Human next steps must be SPECIFIC ENOUGH TO ACT ON. Not "contact the National Archives" — but "Submit a Freedom of Information request to NARA citing RG 92, Entry [X], requesting Army laundry contract records from Virginia military installations 1945–1953, specifically any records referencing the marking system 'R XXXX'."
-6. Never fabricate sources. If you don't know a specific record group number, say you believe it's in a particular record group but the exact entry requires verification.
-
-Return JSON only (no preamble, no markdown):
-{
-  "findings": {
-    "confirmed": ["specific fact — source or basis for confidence"],
-    "probable": ["inference — reasoning and what would confirm it"],
-    "unresolvable_without_human": ["specific gap — what a human would need to do to resolve it"]
-  },
-  "human_next_steps": [
-    { "priority": "high|medium|low", "action": "specific action with enough detail to act on", "target": "exact institution, database, record group, or person", "rationale": "what this could unlock" }
-  ],
-  "follow_up_questions": [
-    "Specific question this research raised that warrants its own investigation"
-  ],
-  "confidence_summary": "2-3 sentences: what is now established, what the key uncertainty is, and the single highest-priority next action"
-}`,
+3. Surface follow-up questions. Every piece of research opens new threads.
+4. Human next steps must be specific enough to act on TODAY — include exact record groups, FOIA language, database names where known.
+5. Never fabricate sources. Flag uncertainty where it exists.`,
         }],
       })
-      const block = resp.content.find(b => b.type === 'text')
-      if (block?.type === 'text') {
-        try {
-          const parsed = extractJson(block.text) as Record<string, unknown>
-          findings = parsed.findings ?? null
-          humanNextSteps = (parsed.human_next_steps as unknown[]) ?? []
-          confidenceSummary = (parsed.confidence_summary as string) ?? ''
-          // Merge follow_up_questions into findings so they persist without a schema change
-          if (parsed.follow_up_questions && findings) {
-            (findings as Record<string, unknown>).follow_up_questions = parsed.follow_up_questions
-          }
-        } catch {
-          confidenceSummary = block.text.slice(0, 500)
+      const toolUse = resp.content.find(b => b.type === 'tool_use')
+      if (toolUse?.type === 'tool_use') {
+        const input = toolUse.input as {
+          confirmed: string[]
+          probable: string[]
+          unresolvable_without_human: string[]
+          human_next_steps: unknown[]
+          follow_up_questions: string[]
+          confidence_summary: string
         }
+        findings = {
+          confirmed: input.confirmed ?? [],
+          probable: input.probable ?? [],
+          unresolvable_without_human: input.unresolvable_without_human ?? [],
+          follow_up_questions: input.follow_up_questions ?? [],
+        }
+        humanNextSteps = input.human_next_steps ?? []
+        confidenceSummary = input.confidence_summary ?? ''
       }
     } catch (err) {
       console.error('Fast research error:', err)
@@ -425,31 +441,75 @@ Return JSON only (no preamble, no markdown):
     const synthResp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
+      tools: [{
+        name: 'submit_synthesis',
+        description: 'Submit the final synthesized research report',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            confirmed: { type: 'array', items: { type: 'string' } },
+            probable: { type: 'array', items: { type: 'string' } },
+            unresolvable_without_human: { type: 'array', items: { type: 'string' } },
+            human_next_steps: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  action: { type: 'string' },
+                  target: { type: 'string' },
+                  rationale: { type: 'string' },
+                },
+                required: ['priority', 'action', 'target', 'rationale'],
+              },
+            },
+            follow_up_questions: { type: 'array', items: { type: 'string' } },
+            sources_consulted: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  url: { type: 'string' },
+                  type: { type: 'string' },
+                  relevance: { type: 'string' },
+                },
+                required: ['name', 'type', 'relevance'],
+              },
+            },
+            confidence_summary: { type: 'string' },
+          },
+          required: ['confirmed', 'probable', 'unresolvable_without_human', 'human_next_steps', 'follow_up_questions', 'confidence_summary'],
+        },
+      }],
+      tool_choice: { type: 'tool', name: 'submit_synthesis' },
       messages: [{ role: 'user', content: synthesisPrompt }],
     })
-    const block = synthResp.content.find(b => b.type === 'text')
-    if (block?.type === 'text') {
-      try {
-        const parsed = extractJson(block.text) as Record<string, unknown>
-        findings = parsed.findings ?? null
-        humanNextSteps = (parsed.human_next_steps as unknown[]) ?? []
-        confidenceSummary = (parsed.confidence_summary as string) ?? ''
-
-        // Merge follow_up_questions into findings JSONB (no schema change needed)
-        if (parsed.follow_up_questions && findings) {
-          (findings as Record<string, unknown>).follow_up_questions = parsed.follow_up_questions
-        }
-
-        if (parsed.sources_consulted?.length) {
-          for (const s of parsed.sources_consulted) {
-            if (!sourcesConsulted.find(sc => sc.url === s.url && sc.name === s.name)) {
-              sourcesConsulted.push(s)
-            }
+    const toolUse = synthResp.content.find(b => b.type === 'tool_use')
+    if (toolUse?.type === 'tool_use') {
+      const input = toolUse.input as {
+        confirmed: string[]
+        probable: string[]
+        unresolvable_without_human: string[]
+        human_next_steps: unknown[]
+        follow_up_questions: string[]
+        sources_consulted?: Array<{ name: string; url?: string; type: string; relevance: string }>
+        confidence_summary: string
+      }
+      findings = {
+        confirmed: input.confirmed ?? [],
+        probable: input.probable ?? [],
+        unresolvable_without_human: input.unresolvable_without_human ?? [],
+        follow_up_questions: input.follow_up_questions ?? [],
+      }
+      humanNextSteps = input.human_next_steps ?? []
+      confidenceSummary = input.confidence_summary ?? ''
+      if (input.sources_consulted?.length) {
+        for (const s of input.sources_consulted) {
+          if (!sourcesConsulted.find(sc => sc.url === s.url && sc.name === s.name)) {
+            sourcesConsulted.push({ name: s.name, url: s.url ?? null, type: s.type, relevance: s.relevance })
           }
         }
-      } catch {
-        // Synthesis response wasn't valid JSON — save the raw text as a summary
-        confidenceSummary = block.text.slice(0, 500)
       }
     }
   } catch (err) {
