@@ -169,7 +169,7 @@ ${entities.slice(0, 15).map(e => `• ${e.entity_type}: ${e.normalized_value || 
 RESEARCH QUESTION: ${task.question}
 ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
 
-  // ── Fast mode (single Haiku call — works on Hobby tier) ─────────────────────
+  // ── Fast mode (single Sonnet call — thorough reasoning from training knowledge) ─
 
   if (!deep) {
     let findings = null
@@ -180,25 +180,39 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
 
     try {
       const resp = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: `You are an investigative research assistant. Using your training knowledge and the case data below, research this question as thoroughly as possible. Be specific — cite exact records, archives, programs, or institutions that are relevant.
+          content: `You are an obsessive investigative research analyst working cold cases. You never give vague summaries — you go deep, follow every thread, and surface specific actionable leads that investigators can actually pursue.
 
 ${caseContext}
 
-Return JSON (no markdown):
+RESEARCH QUESTION: ${task.question}
+${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}
+
+INSTRUCTIONS — read these carefully:
+1. Exhaust everything you know. Do not stop at surface-level facts. Dig into the specific mechanics, history, systems, and institutions relevant to this question.
+2. Be obsessively specific. Not "military records may exist" — but "National Archives Record Group 92 (Office of the Quartermaster General) holds property accountability records; laundry contract records for the 1950s are in Entry 1930 or adjacent entries."
+3. Distinguish clearly: things you can confirm from knowledge vs. things that are reasonable inferences vs. things that genuinely require a human to look up.
+4. Surface follow-up questions. Every piece of research opens new threads. List the specific sub-questions that this research raised — concrete things worth investigating next.
+5. Human next steps must be SPECIFIC ENOUGH TO ACT ON. Not "contact the National Archives" — but "Submit a Freedom of Information request to NARA citing RG 92, Entry [X], requesting Army laundry contract records from Virginia military installations 1945–1953, specifically any records referencing the marking system 'R XXXX'."
+6. Never fabricate sources. If you don't know a specific record group number, say you believe it's in a particular record group but the exact entry requires verification.
+
+Return JSON only (no preamble, no markdown):
 {
   "findings": {
-    "confirmed": ["fact with source — be specific"],
-    "probable": ["inference with reasoning"],
-    "unresolvable_without_human": ["gap requiring human action to resolve"]
+    "confirmed": ["specific fact — source or basis for confidence"],
+    "probable": ["inference — reasoning and what would confirm it"],
+    "unresolvable_without_human": ["specific gap — what a human would need to do to resolve it"]
   },
   "human_next_steps": [
-    { "priority": "high|medium|low", "action": "specific action", "target": "specific institution/database/person", "rationale": "why" }
+    { "priority": "high|medium|low", "action": "specific action with enough detail to act on", "target": "exact institution, database, record group, or person", "rationale": "what this could unlock" }
   ],
-  "confidence_summary": "2-3 sentences: what is now known, what remains uncertain, the single most promising next step"
+  "follow_up_questions": [
+    "Specific question this research raised that warrants its own investigation"
+  ],
+  "confidence_summary": "2-3 sentences: what is now established, what the key uncertainty is, and the single highest-priority next action"
 }`,
         }],
       })
@@ -209,6 +223,10 @@ Return JSON (no markdown):
           findings = parsed.findings ?? null
           humanNextSteps = (parsed.human_next_steps as unknown[]) ?? []
           confidenceSummary = (parsed.confidence_summary as string) ?? ''
+          // Merge follow_up_questions into findings so they persist without a schema change
+          if (parsed.follow_up_questions && findings) {
+            (findings as Record<string, unknown>).follow_up_questions = parsed.follow_up_questions
+          }
         } catch {
           confidenceSummary = block.text.slice(0, 500)
         }
@@ -368,32 +386,35 @@ ${caseContext}
 ALL SEARCH RESULTS (${researchLog.length} queries across ${roundsRun} rounds):
 ${allResultsText.join('\n\n')}
 
-INSTRUCTIONS:
-1. Synthesize EVERYTHING — training knowledge + all search results
-2. Pay special attention to unexpected angles that surfaced during follow-up rounds
-3. Clearly distinguish: confirmed facts vs. strong inferences vs. speculation
-4. Cite every finding to its source (URL, or "training knowledge")
-5. Track dead ends — what was searched and yielded nothing
-6. Human next steps must be SPECIFIC: not "contact authorities" but e.g. "Submit FOIA request to National Archives Record Group 92 (Quartermaster General) for Korean War-era Army laundry contract records from Virginia installations 1950-1953"
-7. NEVER fabricate sources or present inference as fact
+INSTRUCTIONS — be obsessive:
+1. Synthesize EVERYTHING — training knowledge + all search results. Do not stop at surface facts.
+2. Be ruthlessly specific. Not "military records may exist" but "NARA RG 92, Entry 1930, Army laundry contract records for Virginia installations 1945–1953."
+3. Clearly distinguish: confirmed (sourced) vs. probable (reasoned inference) vs. unresolvable without human action.
+4. Cite every finding to its exact source (URL, or specific archive/training knowledge reference).
+5. Surface follow-up questions — every thread this research opened that deserves its own investigation.
+6. Human next steps must be specific enough to act on TODAY. Include exact record groups, FOIA language, database names, contact addresses where known.
+7. NEVER fabricate sources. Flag uncertainty where it exists.
 
-Return JSON (no markdown):
+Return JSON only (no preamble, no markdown):
 {
   "research_log": [
     { "step": 1, "query": "investigated", "finding": "found or not found", "confidence": "high|medium|low", "source": "URL or training knowledge", "dead_end": false }
   ],
   "findings": {
-    "confirmed": ["fact with source"],
-    "probable": ["inference with reasoning"],
-    "unresolvable_without_human": ["gap requiring human action"]
+    "confirmed": ["specific fact — exact source"],
+    "probable": ["inference — reasoning and what would confirm it"],
+    "unresolvable_without_human": ["specific gap — what a human must do to resolve it"]
   },
   "sources_consulted": [
     { "name": "...", "url": "URL or null", "type": "archive|database|publication|web|training_knowledge", "relevance": "..." }
   ],
   "human_next_steps": [
-    { "priority": "high|medium|low", "action": "specific action", "target": "specific institution/database/person", "rationale": "why" }
+    { "priority": "high|medium|low", "action": "specific action with enough detail to act on", "target": "exact institution/record group/database/person", "rationale": "what this could unlock" }
   ],
-  "confidence_summary": "2-3 sentences on what is now known, what remains uncertain, and the single most promising next step"
+  "follow_up_questions": [
+    "Specific question this research raised that warrants its own investigation"
+  ],
+  "confidence_summary": "2-3 sentences: what is now established, the key remaining uncertainty, the single highest-priority next action"
 }`
 
   let findings = null
@@ -413,6 +434,11 @@ Return JSON (no markdown):
         findings = parsed.findings ?? null
         humanNextSteps = (parsed.human_next_steps as unknown[]) ?? []
         confidenceSummary = (parsed.confidence_summary as string) ?? ''
+
+        // Merge follow_up_questions into findings JSONB (no schema change needed)
+        if (parsed.follow_up_questions && findings) {
+          (findings as Record<string, unknown>).follow_up_questions = parsed.follow_up_questions
+        }
 
         if (parsed.sources_consulted?.length) {
           for (const s of parsed.sources_consulted) {

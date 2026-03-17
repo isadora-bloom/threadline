@@ -22,6 +22,7 @@ import {
   ExternalLink,
   ArrowRight,
   BookOpen,
+  Plus,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
@@ -63,6 +64,7 @@ interface ResearchTask {
     confirmed: string[]
     probable: string[]
     unresolvable_without_human: string[]
+    follow_up_questions?: string[]
   } | null
   human_next_steps: NextStep[] | null
   sources_consulted: Source[] | null
@@ -149,6 +151,17 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] }),
   })
+
+  const [queuedFollowUps, setQueuedFollowUps] = useState<Set<number>>(new Set())
+  const queueFollowUp = async (question: string, index: number) => {
+    setQueuedFollowUps(prev => new Set(prev).add(index))
+    await fetch('/api/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caseId: task.case_id, question, trigger_type: 'manual' }),
+    })
+    queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
+  }
 
   const completeMutation = useMutation({
     mutationFn: async () => {
@@ -331,6 +344,32 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                           {step.priority}
                         </span>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Follow-up questions */}
+            {task.findings?.follow_up_questions && task.findings.follow_up_questions.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1">
+                  <Microscope className="h-3 w-3" /> Follow-up questions surfaced
+                </p>
+                <div className="space-y-1.5">
+                  {task.findings.follow_up_questions.map((q, i) => (
+                    <div key={i} className="flex items-start gap-2 bg-indigo-50 border border-indigo-100 rounded px-2.5 py-2">
+                      <p className="text-xs text-slate-700 flex-1 leading-snug">{q}</p>
+                      {queuedFollowUps.has(i) ? (
+                        <span className="text-[10px] text-indigo-400 flex-shrink-0 mt-0.5">Queued</span>
+                      ) : (
+                        <button
+                          className="flex-shrink-0 flex items-center gap-0.5 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium mt-0.5"
+                          onClick={() => queueFollowUp(q, i)}
+                        >
+                          <Plus className="h-2.5 w-2.5" /> Queue
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
