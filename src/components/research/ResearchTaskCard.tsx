@@ -26,12 +26,15 @@ import {
 import { formatDate } from '@/lib/utils'
 
 interface ResearchStep {
+  round: number
   step: number
   query: string
   finding: string
   confidence: 'high' | 'medium' | 'low'
   source: string
   dead_end: boolean
+  is_followup: boolean
+  followup_reason?: string
 }
 
 interface NextStep {
@@ -236,31 +239,62 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
               </div>
             )}
 
-            {/* Sources */}
-            {task.sources_consulted && task.sources_consulted.length > 0 && (
+            {/* Research log + sources */}
+            {(task.research_log?.length || task.sources_consulted?.length) ? (
               <Collapsible open={logOpen} onOpenChange={setLogOpen}>
                 <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700">
                   {logOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                  {task.sources_consulted.length} sources consulted
+                  {task.research_log?.length ?? 0} queries · {task.sources_consulted?.length ?? 0} sources
+                  {(task.research_log as ResearchStep[] | null)?.some(l => l.is_followup) && (
+                    <span className="ml-1 text-[10px] bg-indigo-100 text-indigo-600 px-1 rounded">followed rabbit holes</span>
+                  )}
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="mt-2 space-y-1">
-                    {task.sources_consulted.map((s, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs text-slate-600">
-                        <span className="text-[10px] bg-slate-100 text-slate-500 px-1 rounded uppercase">{s.type}</span>
-                        {s.url ? (
-                          <a href={s.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 text-indigo-600 hover:underline">
-                            {s.name} <ExternalLink className="h-2.5 w-2.5" />
-                          </a>
-                        ) : (
-                          <span>{s.name}</span>
-                        )}
+                  <div className="mt-2 space-y-2">
+                    {/* Group log by round */}
+                    {[1, 2, 3].map(round => {
+                      const roundSteps = (task.research_log as ResearchStep[] | null)?.filter(l => l.round === round) ?? []
+                      if (!roundSteps.length) return null
+                      return (
+                        <div key={round}>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                            {round === 1 ? 'Round 1 — initial queries' : `Round ${round} — follow-up threads`}
+                          </p>
+                          <div className="space-y-1">
+                            {roundSteps.map((step, i) => (
+                              <div key={i} className={`text-xs rounded px-2 py-1 ${step.dead_end ? 'bg-slate-50 text-slate-400' : step.is_followup ? 'bg-indigo-50 text-slate-700' : 'bg-slate-50 text-slate-700'}`}>
+                                <p className="font-medium">{step.query}</p>
+                                {step.followup_reason && <p className="text-[11px] text-indigo-600 italic">↪ {step.followup_reason}</p>}
+                                {step.dead_end && <p className="text-[11px] text-slate-400">Dead end</p>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
+
+                    {/* Sources */}
+                    {task.sources_consulted && task.sources_consulted.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Sources</p>
+                        {task.sources_consulted.map((s, i) => (
+                          <div key={i} className="flex items-start gap-2 text-xs text-slate-600 py-0.5">
+                            <span className="text-[10px] bg-slate-100 text-slate-500 px-1 rounded uppercase flex-shrink-0">{s.type}</span>
+                            {s.url ? (
+                              <a href={s.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 text-indigo-600 hover:underline">
+                                {s.name} <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            ) : (
+                              <span>{s.name}</span>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 </CollapsibleContent>
               </Collapsible>
-            )}
+            ) : null}
 
             {/* Error */}
             {task.error_message && (

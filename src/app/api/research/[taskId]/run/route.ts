@@ -2,12 +2,38 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 
+export const maxDuration = 120 // Vercel Pro allows up to 300s; this gives the loop room to breathe
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+const MAX_ROUNDS = 3          // max iterations of the search loop
+const QUERIES_PER_ROUND = 5   // initial round
+const FOLLOWUPS_PER_ROUND = 3 // follow-up rounds
 
 interface SearchResult {
   title: string
   url: string
   description: string
+}
+
+interface ResearchStep {
+  round: number
+  step: number
+  query: string
+  finding: string
+  confidence: string
+  source: string
+  dead_end: boolean
+  is_followup: boolean
+  followup_reason?: string
+}
+
+// Run all queries in a single round concurrently
+async function runSearchRound(queries: string[]): Promise<Map<string, SearchResult[]>> {
+  const results = await Promise.all(queries.map(q => searchWeb(q)))
+  const map = new Map<string, SearchResult[]>()
+  queries.forEach((q, i) => map.set(q, results[i]))
+  return map
 }
 
 async function searchWeb(query: string): Promise<SearchResult[]> {
@@ -27,6 +53,21 @@ async function searchWeb(query: string): Promise<SearchResult[]> {
   } catch {
     return []
   }
+}
+
+function formatResultsForPrompt(resultsMap: Map<string, SearchResult[]>): string {
+  const parts: string[] = []
+  for (const [query, results] of resultsMap) {
+    if (results.length === 0) {
+      parts.push(`SEARCH: "${query}"\n→ No results`)
+    } else {
+      parts.push(
+        `SEARCH: "${query}"\n` +
+        results.map(r => `  • ${r.title}\n    ${r.url}\n    ${r.description}`).join('\n')
+      )
+    }
+  }
+  return parts.join('\n\n')
 }
 
 export async function POST(
@@ -57,7 +98,6 @@ export async function POST(
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Mark running
   await supabase
     .from('research_tasks')
     .update({ status: 'running', started_at: new Date().toISOString() })
@@ -85,96 +125,9 @@ export async function POST(
   const claims = claimsRes.data ?? []
   const entities = entitiesRes.data ?? []
 
-  // ── Phase 1: Generate search queries ────────────────────────────────────────
-
-  const planPrompt = `You are an investigative research assistant. Given the research question and case context, generate the 5 most targeted web search queries that would surface relevant public information.
-
-CASE: ${caseData?.title ?? 'Unknown'}
+  const caseContext = `CASE: ${caseData?.title ?? 'Unknown'}
 CASE TYPE: ${caseData?.case_type ?? 'Unknown'}
 JURISDICTION: ${caseData?.jurisdiction ?? 'Unknown'}
-
-CONFIRMED CASE FACTS:
-${claims.slice(0, 20).map(c => `• ${c.extracted_text}`).join('\n') || 'None available'}
-
-KEY ENTITIES:
-${entities.slice(0, 15).map(e => `• ${e.entity_type}: ${e.normalized_value || e.raw_value}`).join('\n') || 'None'}
-
-RESEARCH QUESTION: ${task.question}
-${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}
-
-Return ONLY a JSON array of 5 search query strings, most specific first. No markdown.`
-
-  let searchQueries: string[] = []
-  try {
-    const planResp = await anthropic.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 512,
-      messages: [{ role: 'user', content: planPrompt }],
-    })
-    const block = planResp.content.find(b => b.type === 'text')
-    if (block?.type === 'text') {
-      const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-      searchQueries = JSON.parse(raw)
-    }
-  } catch {
-    searchQueries = [task.question]
-  }
-
-  // ── Phase 2: Execute searches ───────────────────────────────────────────────
-
-  const researchLog: Array<{
-    step: number
-    query: string
-    finding: string
-    confidence: string
-    source: string
-    dead_end: boolean
-  }> = []
-
-  const sourcesConsulted: Array<{ name: string; url: string; type: string; relevance: string }> = []
-
-  const searchSummaries: string[] = []
-
-  for (let i = 0; i < searchQueries.length; i++) {
-    const query = searchQueries[i]
-    const results = await searchWeb(query)
-
-    if (results.length === 0) {
-      researchLog.push({
-        step: i + 1,
-        query,
-        finding: 'No web search results (search unavailable or no results)',
-        confidence: 'low',
-        source: 'web_search',
-        dead_end: true,
-      })
-      continue
-    }
-
-    for (const r of results) {
-      sourcesConsulted.push({ name: r.title, url: r.url, type: 'web', relevance: query })
-    }
-
-    const resultText = results.map(r => `Title: ${r.title}\nURL: ${r.url}\nSummary: ${r.description}`).join('\n\n')
-    searchSummaries.push(`SEARCH: "${query}"\n${resultText}`)
-
-    researchLog.push({
-      step: i + 1,
-      query,
-      finding: results.map(r => r.title).join('; '),
-      confidence: 'medium',
-      source: results[0]?.url ?? 'web_search',
-      dead_end: false,
-    })
-  }
-
-  // ── Phase 3: Synthesize ─────────────────────────────────────────────────────
-
-  const synthesisPrompt = `You are an investigative research assistant working on a cold case. Synthesize all available information into a structured research report.
-
-CASE: ${caseData?.title ?? 'Unknown'}
-RESEARCH QUESTION: ${task.question}
-${task.context ? `CONTEXT: ${task.context}` : ''}
 
 CONFIRMED CASE FACTS:
 ${claims.slice(0, 20).map(c => `• (${c.claim_type}) ${c.extracted_text}`).join('\n') || 'None'}
@@ -182,40 +135,176 @@ ${claims.slice(0, 20).map(c => `• (${c.claim_type}) ${c.extracted_text}`).join
 ENTITIES OF INTEREST:
 ${entities.slice(0, 15).map(e => `• ${e.entity_type}: ${e.normalized_value || e.raw_value}${e.notes ? ` — ${e.notes}` : ''}`).join('\n') || 'None'}
 
-WEB SEARCH RESULTS:
-${searchSummaries.join('\n\n---\n\n') || 'No web search results were available. Use your training knowledge only.'}
+RESEARCH QUESTION: ${task.question}
+${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
+
+  // ── Agentic search loop ─────────────────────────────────────────────────────
+
+  const researchLog: ResearchStep[] = []
+  const sourcesConsulted: Array<{ name: string; url: string | null; type: string; relevance: string }> = []
+  const allResultsText: string[] = []
+  let stepCounter = 0
+
+  // Round 0: generate initial queries
+  let currentQueries: string[] = []
+  try {
+    const planResp = await anthropic.messages.create({
+      model: 'claude-opus-4-6',
+      max_tokens: 600,
+      messages: [{
+        role: 'user',
+        content: `You are an investigative research assistant. Generate the ${QUERIES_PER_ROUND} most targeted web search queries for this research question. Think beyond the obvious — include lateral angles, adjacent topics, and unexpected connections that a thorough investigator would pursue.
+
+${caseContext}
+
+Return ONLY a JSON array of ${QUERIES_PER_ROUND} search query strings. Most specific and unusual first — don't start with the obvious. No markdown.`,
+      }],
+    })
+    const block = planResp.content.find(b => b.type === 'text')
+    if (block?.type === 'text') {
+      const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
+      currentQueries = JSON.parse(raw)
+    }
+  } catch {
+    currentQueries = [task.question]
+  }
+
+  // Loop: run queries in parallel, then ask Claude what to follow up
+  for (let round = 1; round <= MAX_ROUNDS; round++) {
+    if (!currentQueries.length) break
+
+    // Run this round's queries in parallel
+    const roundResults = await runSearchRound(currentQueries)
+
+    // Log results
+    for (const [query, results] of roundResults) {
+      stepCounter++
+      const deadEnd = results.length === 0
+
+      for (const r of results) {
+        if (!sourcesConsulted.find(s => s.url === r.url)) {
+          sourcesConsulted.push({ name: r.title, url: r.url, type: 'web', relevance: query })
+        }
+      }
+
+      researchLog.push({
+        round,
+        step: stepCounter,
+        query,
+        finding: deadEnd ? 'No results' : results.map(r => r.title).join(' · '),
+        confidence: deadEnd ? 'low' : 'medium',
+        source: results[0]?.url ?? 'web_search',
+        dead_end: deadEnd,
+        is_followup: round > 1,
+      })
+    }
+
+    const roundText = formatResultsForPrompt(roundResults)
+    allResultsText.push(`=== ROUND ${round} ===\n${roundText}`)
+
+    // Last round — no more follow-ups, go straight to synthesis
+    if (round === MAX_ROUNDS) break
+
+    // Ask Claude: given what we found, what should we follow up on?
+    try {
+      const followupResp = await anthropic.messages.create({
+        model: 'claude-opus-4-6',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content: `You are an investigative research assistant. You just ran a round of searches. Review the results and decide if any threads are worth following up.
+
+${caseContext}
+
+SEARCH RESULTS THIS ROUND:
+${roundText}
+
+ALL RESULTS SO FAR:
+${allResultsText.join('\n\n')}
 
 INSTRUCTIONS:
-1. Work through EVERYTHING you know about this question — training knowledge + search results
-2. Distinguish clearly: confirmed facts vs. strong inferences vs. speculation
-3. For each finding, cite the source (URL, archive, database, or "training knowledge")
-4. Track dead ends explicitly
-5. Human next steps must be SPECIFIC and actionable — not "contact authorities" but "Submit FOIA request to National Archives, Record Group 92 (Office of the Quartermaster General), requesting Korean War-era Army laundry contract records"
-6. NEVER fabricate sources or present inference as confirmed fact
+- Look for unexpected details, partial matches, tangential leads, or anything that surfaced a new angle
+- If a result mentions something surprising — a name, a location, a date, a program, an institution — that could be relevant, chase it
+- Do NOT repeat queries already run
+- If nothing new and promising surfaced, return an empty array
+
+Already searched: ${[...roundResults.keys()].join(', ')}
+
+Return a JSON object:
+{
+  "follow_ups": [
+    { "query": "search query string", "reason": "one sentence on why this thread is worth following" }
+  ]
+}
+
+Maximum ${FOLLOWUPS_PER_ROUND} follow-ups. If nothing genuinely new surfaced, return { "follow_ups": [] }. No markdown.`,
+        }],
+      })
+
+      const block = followupResp.content.find(b => b.type === 'text')
+      if (block?.type === 'text') {
+        const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
+        const parsed = JSON.parse(raw)
+        const followUps: Array<{ query: string; reason: string }> = parsed.follow_ups ?? []
+
+        if (followUps.length === 0) break // Claude says we're done
+
+        currentQueries = followUps.map(f => f.query)
+
+        // Annotate the log with why we're following up
+        for (const f of followUps) {
+          researchLog
+            .filter(l => l.query === f.query)
+            .forEach(l => { l.followup_reason = f.reason })
+        }
+      } else {
+        break
+      }
+    } catch {
+      break // If follow-up generation fails, move to synthesis
+    }
+  }
+
+  // ── Synthesis ───────────────────────────────────────────────────────────────
+
+  const synthesisPrompt = `You are an investigative research assistant working on a cold case. You have now completed ${MAX_ROUNDS} rounds of research, including follow-up threads on unexpected leads. Synthesize everything into a structured report.
+
+${caseContext}
+
+ALL SEARCH RESULTS (${researchLog.length} queries across ${Math.max(...researchLog.map(l => l.round))} rounds):
+${allResultsText.join('\n\n')}
+
+INSTRUCTIONS:
+1. Synthesize EVERYTHING — training knowledge + all search results
+2. Pay special attention to unexpected angles that surfaced during follow-up rounds
+3. Clearly distinguish: confirmed facts vs. strong inferences vs. speculation
+4. Cite every finding to its source (URL, or "training knowledge")
+5. Track dead ends — what was searched and yielded nothing
+6. Human next steps must be SPECIFIC: not "contact authorities" but e.g. "Submit FOIA request to National Archives Record Group 92 (Quartermaster General) for Korean War-era Army laundry contract records from Virginia installations 1950-1953"
+7. NEVER fabricate sources or present inference as fact
 
 Return JSON (no markdown):
 {
   "research_log": [
-    { "step": 1, "query": "what I investigated", "finding": "what I found or didn't find", "confidence": "high|medium|low", "source": "URL or 'training knowledge' or 'web search'", "dead_end": false }
+    { "step": 1, "query": "investigated", "finding": "found or not found", "confidence": "high|medium|low", "source": "URL or training knowledge", "dead_end": false }
   ],
   "findings": {
-    "confirmed": ["specific confirmed fact with source"],
+    "confirmed": ["fact with source"],
     "probable": ["inference with reasoning"],
-    "unresolvable_without_human": ["specific gap that requires human action"]
+    "unresolvable_without_human": ["gap requiring human action"]
   },
   "sources_consulted": [
-    { "name": "source name", "url": "URL or null", "type": "archive|database|publication|web|training_knowledge", "relevance": "why consulted" }
+    { "name": "...", "url": "URL or null", "type": "archive|database|publication|web|training_knowledge", "relevance": "..." }
   ],
   "human_next_steps": [
-    { "priority": "high|medium|low", "action": "specific action", "target": "specific institution, person, or database", "rationale": "why this step" }
+    { "priority": "high|medium|low", "action": "specific action", "target": "specific institution/database/person", "rationale": "why" }
   ],
-  "confidence_summary": "2-3 sentence overall assessment of what is known, what is uncertain, and what the most promising next step is"
+  "confidence_summary": "2-3 sentences on what is now known, what remains uncertain, and the single most promising next step"
 }`
 
   let findings = null
   let humanNextSteps: unknown[] = []
   let confidenceSummary = ''
-  const fullLog = [...researchLog]
 
   try {
     const synthResp = await anthropic.messages.create({
@@ -230,13 +319,7 @@ Return JSON (no markdown):
       findings = parsed.findings ?? null
       humanNextSteps = parsed.human_next_steps ?? []
       confidenceSummary = parsed.confidence_summary ?? ''
-      // Merge research logs
-      if (parsed.research_log?.length) {
-        for (const step of parsed.research_log) {
-          if (!fullLog.find(l => l.step === step.step)) fullLog.push(step)
-        }
-      }
-      // Merge sources
+
       if (parsed.sources_consulted?.length) {
         for (const s of parsed.sources_consulted) {
           if (!sourcesConsulted.find(sc => sc.url === s.url && sc.name === s.name)) {
@@ -254,13 +337,13 @@ Return JSON (no markdown):
     return NextResponse.json({ error: 'Research synthesis failed' }, { status: 500 })
   }
 
-  // ── Save results ────────────────────────────────────────────────────────────
+  // ── Save ────────────────────────────────────────────────────────────────────
 
   const { data: updated, error: updateErr } = await supabase
     .from('research_tasks')
     .update({
       status: 'awaiting_review',
-      research_log: fullLog,
+      research_log: researchLog,
       findings,
       human_next_steps: humanNextSteps,
       sources_consulted: sourcesConsulted,
@@ -271,18 +354,15 @@ Return JSON (no markdown):
     .select()
     .single()
 
-  if (updateErr) {
-    return NextResponse.json({ error: 'Failed to save results' }, { status: 500 })
-  }
+  if (updateErr) return NextResponse.json({ error: 'Failed to save results' }, { status: 500 })
 
-  // Audit log
   await supabase.from('review_actions').insert({
     actor_id: user.id,
     action: 'research_completed',
     target_type: 'case',
     target_id: task.case_id,
     case_id: task.case_id,
-    note: `Research task completed: "${task.question}". Sources: ${sourcesConsulted.length}. Next steps: ${humanNextSteps.length}.`,
+    note: `Research completed: "${task.question}". ${researchLog.length} queries across ${Math.max(...researchLog.map(l => l.round))} rounds. Sources: ${sourcesConsulted.length}. Next steps: ${humanNextSteps.length}.`,
   })
 
   return NextResponse.json({ task: updated })
