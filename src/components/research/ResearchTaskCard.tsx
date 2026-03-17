@@ -97,8 +97,12 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
   const [logOpen, setLogOpen] = useState(false)
 
   const runMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/research/${task.id}/run`, { method: 'POST' })
+    mutationFn: async (deep = false) => {
+      const res = await fetch(`/api/research/${task.id}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deep }),
+      })
       if (!res.ok) {
         let msg = 'Run failed'
         try { const err = await res.json(); msg = err.error ?? msg } catch {}
@@ -110,7 +114,6 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
       queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
     },
     onError: () => {
-      // Refetch so the UI reflects whatever status the server left the task in
       queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
     },
   })
@@ -160,7 +163,7 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                   variant="outline"
                   className="h-7 text-xs"
                   disabled={runMutation.isPending}
-                  onClick={e => { e.stopPropagation(); runMutation.mutate() }}
+                  onClick={e => { e.stopPropagation(); runMutation.mutate(false) }}
                 >
                   {runMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                   Run
@@ -172,7 +175,7 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                   variant="ghost"
                   className="h-7 text-xs text-slate-500"
                   disabled={runMutation.isPending}
-                  onClick={e => { e.stopPropagation(); runMutation.mutate() }}
+                  onClick={e => { e.stopPropagation(); runMutation.mutate(false) }}
                 >
                   {runMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                   Re-run
@@ -320,7 +323,21 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
               </p>
             )}
 
-            {/* Mark complete */}
+            {/* Dig deeper + mark complete */}
+            {canRun && ['awaiting_review', 'complete'].includes(task.status) && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full h-7 text-xs gap-1 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                disabled={runMutation.isPending}
+                onClick={() => runMutation.mutate(true)}
+              >
+                {runMutation.isPending
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <Microscope className="h-3 w-3" />}
+                Dig deeper — run full agentic search loop
+              </Button>
+            )}
             {task.status === 'awaiting_review' && canRun && (
               <Button
                 size="sm"

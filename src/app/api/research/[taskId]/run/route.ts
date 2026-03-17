@@ -71,13 +71,16 @@ function formatResultsForPrompt(resultsMap: Map<string, SearchResult[]>): string
 }
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ taskId: string }> }
 ) {
   const { taskId } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const body = await req.json().catch(() => ({}))
+  const deep = body?.deep === true
 
   const { data: task } = await supabase
     .from('research_tasks')
@@ -141,7 +144,72 @@ ${entities.slice(0, 15).map(e => `• ${e.entity_type}: ${e.normalized_value || 
 RESEARCH QUESTION: ${task.question}
 ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
 
-  // ── Agentic search loop ─────────────────────────────────────────────────────
+  // ── Fast mode (single Haiku call — works on Hobby tier) ─────────────────────
+
+  if (!deep) {
+    let findings = null
+    let humanNextSteps: unknown[] = []
+    let confidenceSummary = ''
+    const researchLog = [{ round: 1, step: 1, query: task.question, finding: 'Synthesised from case data and training knowledge', confidence: 'medium', source: 'training_knowledge', dead_end: false, is_followup: false }]
+    const sourcesConsulted = [{ name: 'Case records + AI training knowledge', url: null, type: 'training_knowledge', relevance: task.question }]
+
+    try {
+      const resp = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: `You are an investigative research assistant. Using your training knowledge and the case data below, research this question as thoroughly as possible. Be specific — cite exact records, archives, programs, or institutions that are relevant.
+
+${caseContext}
+
+Return JSON (no markdown):
+{
+  "findings": {
+    "confirmed": ["fact with source — be specific"],
+    "probable": ["inference with reasoning"],
+    "unresolvable_without_human": ["gap requiring human action to resolve"]
+  },
+  "human_next_steps": [
+    { "priority": "high|medium|low", "action": "specific action", "target": "specific institution/database/person", "rationale": "why" }
+  ],
+  "confidence_summary": "2-3 sentences: what is now known, what remains uncertain, the single most promising next step"
+}`,
+        }],
+      })
+      const block = resp.content.find(b => b.type === 'text')
+      if (block?.type === 'text') {
+        const raw = block.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
+        try {
+          const parsed = JSON.parse(raw)
+          findings = parsed.findings ?? null
+          humanNextSteps = parsed.human_next_steps ?? []
+          confidenceSummary = parsed.confidence_summary ?? ''
+        } catch {
+          confidenceSummary = block.text.slice(0, 500)
+        }
+      }
+    } catch (err) {
+      console.error('Fast research error:', err)
+      confidenceSummary = 'Research failed. Try again or use Dig Deeper.'
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from('research_tasks')
+      .update({ status: 'awaiting_review', research_log: researchLog, findings, human_next_steps: humanNextSteps, sources_consulted: sourcesConsulted, confidence_summary: confidenceSummary, completed_at: new Date().toISOString() })
+      .eq('id', taskId)
+      .select()
+      .single()
+
+    if (updateErr) {
+      console.error('Save error:', updateErr)
+      return NextResponse.json({ error: 'Failed to save results' }, { status: 500 })
+    }
+
+    return NextResponse.json({ task: updated })
+  }
+
+  // ── Deep mode (agentic loop — requires Vercel Pro / maxDuration = 120) ───────
 
   const researchLog: ResearchStep[] = []
   const sourcesConsulted: Array<{ name: string; url: string | null; type: string; relevance: string }> = []
