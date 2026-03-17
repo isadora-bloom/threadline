@@ -28,11 +28,29 @@ interface ResearchStep {
   followup_reason?: string
 }
 
-// Extract the first valid JSON object or array from a Claude response string
+// Extract the first valid JSON object from a Claude response string.
+// Handles markdown code blocks, preamble text, and unbalanced stray braces.
 function extractJson(text: string): unknown {
-  const match = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/)
-  if (!match) throw new Error('No JSON found in response')
-  return JSON.parse(match[0])
+  // 1. Try markdown code block first
+  const mdMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (mdMatch) {
+    try { return JSON.parse(mdMatch[1].trim()) } catch {}
+  }
+  // 2. Find the first `{"` or `{ "` — start of a real JSON object
+  const start = text.search(/\{\s*"/)
+  if (start === -1) throw new Error('No JSON object found in response')
+  // 3. Walk forward counting balanced braces
+  let depth = 0
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '{') depth++
+    else if (text[i] === '}') {
+      depth--
+      if (depth === 0) {
+        return JSON.parse(text.slice(start, i + 1))
+      }
+    }
+  }
+  throw new Error('Unbalanced JSON in response')
 }
 
 // Run all queries in a single round concurrently
