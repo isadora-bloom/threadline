@@ -95,6 +95,15 @@ function formatResultsForPrompt(resultsMap: Map<string, SearchResult[]>): string
   return parts.join('\n\n')
 }
 
+interface ResearchTask {
+  id: string
+  case_id: string
+  question: string
+  context: string | null
+  status: string
+  started_at: string | null
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ taskId: string }> }
@@ -107,11 +116,13 @@ export async function POST(
   const body = await req.json().catch(() => ({}))
   const deep = body?.deep === true
 
-  const { data: task } = await supabase
+  const { data: rawTask } = await supabase
     .from('research_tasks')
     .select('*')
     .eq('id', taskId)
     .single()
+
+  const task = rawTask as ResearchTask | null
 
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (task.status === 'running') return NextResponse.json({ error: 'Already running' }, { status: 409 })
@@ -119,19 +130,20 @@ export async function POST(
     return NextResponse.json({ error: 'Cannot run task in current state' }, { status: 409 })
   }
 
-  const { data: roleData } = await supabase
+  const { data: rawRole } = await supabase
     .from('case_user_roles')
     .select('role')
     .eq('case_id', task.case_id)
     .eq('user_id', user.id)
     .single()
+  const roleData = rawRole as { role: string } | null
   if (!roleData || !['lead_investigator', 'admin'].includes(roleData.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   await supabase
     .from('research_tasks')
-    .update({ status: 'running', started_at: new Date().toISOString() })
+    .update({ status: 'running', started_at: new Date().toISOString() } as never)
     .eq('id', taskId)
 
   // ── Fetch case context ──────────────────────────────────────────────────────
@@ -152,9 +164,9 @@ export async function POST(
       .limit(30),
   ])
 
-  const caseData = caseRes.data
-  const claims = claimsRes.data ?? []
-  const entities = entitiesRes.data ?? []
+  const caseData = caseRes.data as { title: string; case_type: string; jurisdiction: string | null; notes: string | null } | null
+  const claims = (claimsRes.data ?? []) as Array<{ claim_type: string; extracted_text: string }>
+  const entities = (entitiesRes.data ?? []) as Array<{ entity_type: string; raw_value: string; normalized_value: string | null; notes: string | null }>
 
   const caseContext = `CASE: ${caseData?.title ?? 'Unknown'}
 CASE TYPE: ${caseData?.case_type ?? 'Unknown'}
@@ -254,7 +266,7 @@ INSTRUCTIONS:
 
     const { data: updated, error: updateErr } = await supabase
       .from('research_tasks')
-      .update({ status: 'awaiting_review', research_log: researchLog, findings, human_next_steps: humanNextSteps, sources_consulted: sourcesConsulted, confidence_summary: confidenceSummary, completed_at: new Date().toISOString() })
+      .update({ status: 'awaiting_review', research_log: researchLog, findings, human_next_steps: humanNextSteps, sources_consulted: sourcesConsulted, confidence_summary: confidenceSummary, completed_at: new Date().toISOString() } as never)
       .eq('id', taskId)
       .select()
       .single()
@@ -529,7 +541,7 @@ Return JSON only (no preamble, no markdown):
       sources_consulted: sourcesConsulted,
       confidence_summary: confidenceSummary,
       completed_at: new Date().toISOString(),
-    })
+    } as never)
     .eq('id', taskId)
     .select()
     .single()
@@ -547,7 +559,7 @@ Return JSON only (no preamble, no markdown):
     target_id: task.case_id,
     case_id: task.case_id,
     note: `Research completed: "${task.question}". ${researchLog.length} queries across ${roundsRun} rounds. Sources: ${sourcesConsulted.length}. Next steps: ${humanNextSteps.length}.`,
-  }).then(({ error }) => { if (error) console.warn('Audit log failed:', error.message) })
+  } as never).then(({ error }: { error: { message: string } | null }) => { if (error) console.warn('Audit log failed:', error.message) })
 
   return NextResponse.json({ task: updated })
 }
