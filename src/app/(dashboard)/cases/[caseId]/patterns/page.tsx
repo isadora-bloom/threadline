@@ -14,6 +14,7 @@ import { SocialNetworkGraph } from '@/components/patterns/SocialNetworkGraph'
 import { CaseLinkageView } from '@/components/patterns/CaseLinkageView'
 import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads'
 import { ResearchTaskList } from '@/components/research/ResearchTaskList'
+import { DoeMatchView } from '@/components/patterns/DoeMatchView'
 import { useToast } from '@/components/ui/use-toast'
 import { useParams } from 'next/navigation'
 import {
@@ -29,6 +30,7 @@ import {
   AlertTriangle,
   Sparkles,
   Microscope,
+  GitMerge,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
@@ -252,7 +254,7 @@ export default function PatternIntelligencePage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         {roleLoaded && (
-        <TabsList className={`grid w-full max-w-3xl ${canRunAnalysis ? 'grid-cols-7' : 'grid-cols-6'}`}>
+        <TabsList className={`grid w-full max-w-4xl ${canRunAnalysis ? 'grid-cols-8' : 'grid-cols-7'}`}>
           <TabsTrigger value="flags" className="text-xs">
             <Flag className="h-3.5 w-3.5 mr-1" />
             Flags
@@ -288,6 +290,10 @@ export default function PatternIntelligencePage() {
             <Microscope className="h-3.5 w-3.5 mr-1" />
             Research
           </TabsTrigger>
+          <TabsTrigger value="doe-match" className="text-xs">
+            <GitMerge className="h-3.5 w-3.5 mr-1" />
+            Match
+          </TabsTrigger>
         </TabsList>
         )}
 
@@ -319,6 +325,10 @@ export default function PatternIntelligencePage() {
 
         <TabsContent value="research" className="mt-4">
           <ResearchTaskList caseId={caseId} canManage={canRunAnalysis} />
+        </TabsContent>
+
+        <TabsContent value="doe-match" className="mt-4">
+          <DoeMatchView caseId={caseId} canManage={canRunAnalysis} />
         </TabsContent>
       </Tabs>
     </div>

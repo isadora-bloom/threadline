@@ -217,7 +217,6 @@ async function importCaseFile(
     const { data: submission, error: subErr } = await supabase
       .from('submissions')
       .insert({
-        case_id: caseId,
         raw_text: rawText,
         source_type: 'official_record',
         submitter_consent: 'on_record',
@@ -272,7 +271,6 @@ async function importCaseFile(
       claimRows.push({
         submission_id: submissionId,
         original_submission_id: submissionId,
-        case_id: caseId,
         claim_position: claimPosition++,
         extracted_text: `Reported physical description: ${physText}`,
         claim_type: 'physical_description',
@@ -290,7 +288,6 @@ async function importCaseFile(
       claimRows.push({
         submission_id: submissionId,
         original_submission_id: submissionId,
-        case_id: caseId,
         claim_position: claimPosition++,
         extracted_text: doe.circumstances,
         claim_type: 'statement',
@@ -317,7 +314,6 @@ async function importCaseFile(
         claimRows.push({
           submission_id: submissionId,
           original_submission_id: submissionId,
-          case_id: caseId,
           claim_position: claimPosition++,
           extracted_text: `Discovery circumstances: ${discoveryParts}`,
           claim_type: 'official',
@@ -342,7 +338,6 @@ async function importCaseFile(
     claimRows.push({
       submission_id: submissionId,
       original_submission_id: submissionId,
-      case_id: caseId,
       claim_position: claimPosition++,
       extracted_text: `${refParts}. Source: ${doe.url}`,
       claim_type: 'identifier',
@@ -376,7 +371,6 @@ async function importCaseFile(
     const { data: personEntity } = await supabase
       .from('entities')
       .insert({
-        case_id: caseId,
         entity_type: 'person',
         raw_value: personValue,
         normalized_value: doe.name || null,
@@ -403,7 +397,6 @@ async function importCaseFile(
       const { data: locEntity } = await supabase
         .from('entities')
         .insert({
-          case_id: caseId,
           entity_type: 'location',
           raw_value: locationValue,
           normalization_status: 'raw',
@@ -445,7 +438,6 @@ async function importCaseFile(
       const { data: vehicleEntity } = await supabase
         .from('entities')
         .insert({
-          case_id: caseId,
           entity_type: 'vehicle',
           raw_value: vehicleText.slice(0, 500),
           normalization_status: 'raw',
