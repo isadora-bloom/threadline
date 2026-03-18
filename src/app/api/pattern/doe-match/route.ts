@@ -496,6 +496,79 @@ function scoreMarks(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: st
   }
 }
 
+// Words that are too generic to constitute a "unique identifier" — body positions,
+// common garment types, generic mark terms. A match only on these is not specific.
+const GENERIC_IDENTIFIER_WORDS = new Set([
+  'tattoo','scar','mark','left','right','upper','lower','inner','outer','small','large',
+  'arm','leg','chest','back','neck','hand','shoulder','wrist','ankle','face','forehead',
+  'abdomen','torso','skin','body',
+  'shirt','pants','jeans','shoes','jacket','coat','clothing','worn','wearing',
+  'unknown','available','not',
+])
+
+// Extract meaningful content words from marks+clothing+jewelry text
+// Strips stop words, numbers, punctuation — leaves the specific identifiers
+function extractContentWords(p: ParsedCase): Set<string> {
+  const text = [p.marks, p.clothing, p.jewelry].filter(Boolean).join(' ').toLowerCase()
+  if (!text) return new Set()
+  return new Set(
+    text
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 4 && !GENERIC_IDENTIFIER_WORDS.has(w) && !/^\d+$/.test(w))
+  )
+}
+
+// Score based on shared specific content words.
+// 3+ shared content words = strong match (likely unique identifier)
+// 2 shared = possible match
+// Outputs a score bonus AND a flag that can override sex/age elimination
+function scoreUniqueIdentifier(a: ParsedCase, b: ParsedCase): {
+  score: number
+  sharedWords: string[]
+  strength: 'none' | 'possible' | 'strong' | 'near_certain'
+  overridesElimination: boolean
+  detail: string | null
+} {
+  const wordsA = extractContentWords(a)
+  const wordsB = extractContentWords(b)
+  if (wordsA.size === 0 || wordsB.size === 0) {
+    return { score: 0, sharedWords: [], strength: 'none', overridesElimination: false, detail: null }
+  }
+  const shared = [...wordsA].filter(w => wordsB.has(w))
+  if (shared.length === 0) {
+    return { score: 0, sharedWords: [], strength: 'none', overridesElimination: false, detail: null }
+  }
+  if (shared.length >= 5) {
+    return {
+      score: 25,
+      sharedWords: shared,
+      strength: 'near_certain',
+      overridesElimination: true,
+      detail: `Near-certain physical identifier match: "${shared.slice(0, 6).join(', ')}" — even if demographic signals conflict, these records share highly specific descriptors`,
+    }
+  }
+  if (shared.length >= 3) {
+    return {
+      score: 15,
+      sharedWords: shared,
+      strength: 'strong',
+      overridesElimination: true,
+      detail: `Strong physical identifier match: "${shared.join(', ')}" — review for same person or connected case`,
+    }
+  }
+  if (shared.length >= 2) {
+    return {
+      score: 5,
+      sharedWords: shared,
+      strength: 'possible',
+      overridesElimination: false,
+      detail: `Possible identifier overlap: "${shared.join(', ')}"`,
+    }
+  }
+  return { score: 0, sharedWords: shared, strength: 'none', overridesElimination: false, detail: null }
+}
+
 function forensicAvailabilityNote(a: ParsedCase, b: ParsedCase): string | null {
   const notes: string[] = []
   if (a.dental && a.dental.toLowerCase().includes('available')) notes.push('Missing: dental records available')
@@ -524,8 +597,13 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   eliminated: boolean
   eliminationReason?: string
 } {
+  // Check for unique physical identifiers FIRST — a matching medallion inscription
+  // or specific tattoo/garment can override demographic eliminations. Two people
+  // don't share "silver medallion engraved come holy spirit" or the same rare tattoo.
+  const uniqueId = scoreUniqueIdentifier(missing, unidentified)
+
   const sexSig = scoreSex(missing, unidentified)
-  if (sexSig.score < -100) {
+  if (sexSig.score < -100 && !uniqueId.overridesElimination) {
     return {
       signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' } },
       composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'sex_mismatch',
@@ -533,7 +611,7 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   }
 
   const ageSig = scoreAge(missing, unidentified)
-  if (ageSig.score < -5) {
+  if (ageSig.score < -5 && !uniqueId.overridesElimination) {
     return {
       signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: ageSig, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' } },
       composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'age_incompatible',
@@ -578,11 +656,25 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
     (1 - w.marks)  * MAX_SIGNAL_SCORES.marks
   const adjustedMax = Math.max(30, MAX_POSSIBLE_BASE - Math.round(deductedMax))
 
+  // Inject unique identifier signal — added separately because it can change grade
+  // regardless of decomposition state and can survive demographic eliminations
+  if (uniqueId.strength !== 'none') {
+    (signals as unknown as Record<string, unknown>).unique_identifier = {
+      score: uniqueId.score,
+      match: uniqueId.strength,
+      keywords: uniqueId.sharedWords,
+      detail: uniqueId.detail,
+      overrode_elimination: uniqueId.overridesElimination && (sexSig.score < -100 || ageSig.score < -5),
+    }
+  }
+
   const rawScore = Object.entries(signals)
-    .filter(([k]) => k !== 'body_state')
+    .filter(([k]) => !['body_state', 'forensic_availability', 'unique_identifier'].includes(k))
     .reduce((sum, [, s]) => sum + ((s as SignalResult).score > 0 ? (s as SignalResult).score : 0), 0)
 
-  const composite = Math.round(Math.min(100, (rawScore / adjustedMax) * 100))
+  // Apply unique identifier bonus on top — it's additive and not subject to decomp scaling
+  const identifierBonus = uniqueId.score
+  const composite = Math.round(Math.min(100, ((rawScore + identifierBonus) / adjustedMax) * 100))
   const grade =
     composite >= 73 ? 'very_strong' :
     composite >= 56 ? 'strong' :
@@ -592,7 +684,7 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   // Add forensic availability note — tells investigator if dental/DNA/prints can confirm this match
   const forensicNote = forensicAvailabilityNote(missing, unidentified)
   if (forensicNote) {
-    (signals as Record<string, unknown>).forensic_availability = { note: forensicNote }
+    (signals as unknown as Record<string, unknown>).forensic_availability = { note: forensicNote }
   }
 
   return { signals, composite, grade, eliminated: false }

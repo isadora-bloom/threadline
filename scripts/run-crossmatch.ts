@@ -155,6 +155,27 @@ const STATE_ADJ: Record<string, string[]> = {
   NY:['NJ','CT','MA','VT','PA'], PA:['NY','NJ','DE','MD','WV','OH'],
   WA:['OR','ID'], OR:['WA','ID','NV','CA'],
 }
+const GENERIC_ID_WORDS = new Set([
+  'tattoo','scar','mark','left','right','upper','lower','inner','outer','small','large',
+  'arm','leg','chest','back','neck','hand','shoulder','wrist','ankle','face','forehead',
+  'abdomen','torso','skin','body','shirt','pants','jeans','shoes','jacket','coat',
+  'clothing','worn','wearing','unknown','available','not',
+])
+function extractContentWords(p: ParsedCase): Set<string> {
+  const text = [p.marks, p.clothing, p.jewelry].filter(Boolean).join(' ').toLowerCase()
+  if (!text) return new Set()
+  return new Set(text.replace(/[^\w\s]/g,' ').split(/\s+/).filter(w => w.length >= 4 && !GENERIC_ID_WORDS.has(w) && !/^\d+$/.test(w)))
+}
+function scoreUniqueId(a: ParsedCase, b: ParsedCase) {
+  const wA = extractContentWords(a), wB = extractContentWords(b)
+  if (!wA.size || !wB.size) return { score: 0, shared: [] as string[], overrides: false, detail: null as string|null }
+  const shared = [...wA].filter(w => wB.has(w))
+  if (shared.length >= 5) return { score: 25, shared, overrides: true, detail: `Near-certain identifier match: "${shared.slice(0,6).join(', ')}"` }
+  if (shared.length >= 3) return { score: 15, shared, overrides: true, detail: `Strong identifier match: "${shared.join(', ')}" — review for same person or connected case` }
+  if (shared.length >= 2) return { score: 5,  shared, overrides: false, detail: `Possible identifier overlap: "${shared.join(', ')}"` }
+  return { score: 0, shared: [] as string[], overrides: false, detail: null as string|null }
+}
+
 const MARK_KW = [
   'tattoo','scar','birthmark','piercing','mole','brand','amputation','prosthetic','implant',
   'surgical','surgery','deformity','missing finger','missing tooth','gold tooth',
@@ -194,14 +215,17 @@ function parseAgeRange(s: string | null): [number,number] | null {
 }
 
 function scoreMatch(m: ParsedCase, u: ParsedCase) {
+  // Check for unique physical identifiers BEFORE eliminating on demographics
+  const uniqueId = scoreUniqueId(m, u)
+
   const sa = normSex(m.sex), sb = normSex(u.sex)
-  if (sa && sb && sa !== sb) return { eliminated: true, reason: 'sex_mismatch', composite: 0, grade: 'weak', signals: {} }
+  if (sa && sb && sa !== sb && !uniqueId.overrides) return { eliminated: true, reason: 'sex_mismatch', composite: 0, grade: 'weak', signals: {} }
 
   const ma = parseAgeRange(m.age), ua = parseAgeRange(u.age)
   if (ma && ua) {
     let adj = ma as [number,number]
     if (m.year && u.year && u.year > m.year) { const e = u.year - m.year; adj = [ma[0]+e, ma[1]+e] }
-    if (adj[0] > ua[1] + 10 || ua[0] > adj[1] + 10) return { eliminated: true, reason: 'age_incompatible', composite: 0, grade: 'weak', signals: {} }
+    if ((adj[0] > ua[1] + 10 || ua[0] > adj[1] + 10) && !uniqueId.overrides) return { eliminated: true, reason: 'age_incompatible', composite: 0, grade: 'weak', signals: {} }
   }
 
   // Sex
@@ -273,10 +297,10 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
   const adjustedMax = Math.max(30, MAX_BASE - Math.round(deductedMax))
 
   const rawScore = sexScore + raceScore + ageScore + hair + eyes + heightScore + weight + marks + locationScore
-  const composite = Math.round(Math.min(100, (Math.max(0, rawScore) / adjustedMax) * 100))
+  const composite = Math.round(Math.min(100, (Math.max(0, rawScore + uniqueId.score) / adjustedMax) * 100))
   const grade = composite >= 73 ? 'very_strong' : composite >= 56 ? 'strong' : composite >= 39 ? 'notable' : composite >= 22 ? 'moderate' : 'weak'
 
-  const signals = {
+  const signals: Record<string, unknown> = {
     sex:      { score: sexScore,    match: !sa||!sb ? 'unknown' : sa===sb ? 'exact' : 'mismatch' },
     race:     { score: raceScore,   match: !ra&&!rb ? 'both_unknown' : !ra||!rb ? 'unknown' : ra===rb ? 'exact' : raceScore===6 ? 'partial' : 'no_match' },
     age:      { score: ageScore,    match: ageScore===15?'very_close':ageScore===10?'close':ageScore===5?'possible':ageScore===2?'overlap':'unknown', detail: ageDet },
@@ -298,7 +322,14 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
   if (m.fingerprints?.toLowerCase().includes('available')) forensicNotes.push('Missing: prints available')
   if (u.fingerprints?.toLowerCase().includes('available')) forensicNotes.push('Unidentified: prints available')
   if (forensicNotes.length) {
-    (signals as Record<string, unknown>).forensic_availability = { note: forensicNotes.join('; ') }
+    signals.forensic_availability = { note: forensicNotes.join('; ') }
+  }
+  if (uniqueId.score > 0) {
+    signals.unique_identifier = {
+      score: uniqueId.score, match: uniqueId.shared.length >= 5 ? 'near_certain' : uniqueId.shared.length >= 3 ? 'strong' : 'possible',
+      keywords: uniqueId.shared, detail: uniqueId.detail,
+      overrode_elimination: uniqueId.overrides && (sa && sb && sa !== sb),
+    }
   }
 
   return { eliminated: false, composite, grade, signals }
