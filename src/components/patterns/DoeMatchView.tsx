@@ -1117,12 +1117,15 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     },
   })
 
+  // Always use the Missing Persons case ID for queries — caseId might be any Doe Network case
+  const effectiveCaseId = doeCases?.missing ?? caseId
+
   // Fetch match candidates
   const matchQuery = useQuery({
-    queryKey: ['doe-matches', caseId, gradeFilter, statusFilter, page],
+    queryKey: ['doe-matches', effectiveCaseId, gradeFilter, statusFilter, page],
     queryFn: async () => {
       const params = new URLSearchParams({
-        missingCaseId: caseId,
+        missingCaseId: effectiveCaseId,
         type: 'matches',
         page: String(page),
       })
@@ -1136,9 +1139,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
 
   // Fetch clusters
   const clusterQuery = useQuery({
-    queryKey: ['doe-clusters', caseId, statusFilter, clusterTypeFilter, page],
+    queryKey: ['doe-clusters', effectiveCaseId, statusFilter, clusterTypeFilter, page],
     queryFn: async () => {
-      const params = new URLSearchParams({ missingCaseId: caseId, type: 'clusters', page: String(page) })
+      const params = new URLSearchParams({ missingCaseId: effectiveCaseId, type: 'clusters', page: String(page) })
       if (statusFilter !== 'all')     params.set('reviewerStatus', statusFilter)
       if (clusterTypeFilter !== 'all') params.set('clusterType', clusterTypeFilter)
       const res = await fetch(`/api/pattern/doe-match?${params}`)
@@ -1149,9 +1152,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
 
   // Fetch stall flags
   const stallQuery = useQuery({
-    queryKey: ['doe-stalls', caseId, statusFilter, stallTypeFilter, page],
+    queryKey: ['doe-stalls', effectiveCaseId, statusFilter, stallTypeFilter, page],
     queryFn: async () => {
-      const p = new URLSearchParams({ missingCaseId: caseId, type: 'stalls', page: String(page) })
+      const p = new URLSearchParams({ missingCaseId: effectiveCaseId, type: 'stalls', page: String(page) })
       if (statusFilter !== 'all')   p.set('reviewerStatus', statusFilter)
       if (stallTypeFilter !== 'all') p.set('stallType', stallTypeFilter)
       const res = await fetch(`/api/pattern/doe-match?${p}`)
@@ -1162,9 +1165,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
 
   // Fetch entity mentions
   const entityQuery = useQuery({
-    queryKey: ['doe-entities', caseId, entityTypeFilter, page],
+    queryKey: ['doe-entities', effectiveCaseId, entityTypeFilter, page],
     queryFn: async () => {
-      const p = new URLSearchParams({ missingCaseId: caseId, type: 'entities', page: String(page) })
+      const p = new URLSearchParams({ missingCaseId: effectiveCaseId, type: 'entities', page: String(page) })
       if (entityTypeFilter !== 'all') p.set('entityType', entityTypeFilter)
       const res = await fetch(`/api/pattern/doe-match?${p}`)
       return await res.json() as { entities: DoeEntityMention[]; total: number }
@@ -1180,7 +1183,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'cross_match',
-          missingCaseId: caseId,
+          missingCaseId: effectiveCaseId,
           unidentifiedCaseId,
           offset: startOffset,
           limit: 400,
@@ -1202,7 +1205,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         await runCrossMatch(unidentifiedCaseId, data.nextOffset, newTotal, newMatches)
       } else {
         setRunState(prev => ({ ...prev, running: false }))
-        queryClient.invalidateQueries({ queryKey: ['doe-matches', caseId] })
+        queryClient.invalidateQueries({ queryKey: ['doe-matches', effectiveCaseId] })
       }
     } catch {
       setRunState(prev => ({ ...prev, running: false }))
@@ -1215,9 +1218,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cluster', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'cluster', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
     } finally {
       setClusterRunning(false)
     }
@@ -1229,9 +1232,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'circumstance_cluster', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'circumstance_cluster', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
     } finally {
       setCircumstanceRunning(false)
     }
@@ -1241,9 +1244,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     await fetch('/api/pattern/doe-match', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'synthesize_cluster', missingCaseId: caseId, clusterId }),
+      body: JSON.stringify({ action: 'synthesize_cluster', missingCaseId: effectiveCaseId, clusterId }),
     })
-    queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+    queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
   }, [caseId, queryClient])
 
   const reviewMatch = useCallback(async (id: string, status: string) => {
@@ -1252,7 +1255,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, type: 'match', reviewerStatus: status }),
     })
-    queryClient.invalidateQueries({ queryKey: ['doe-matches', caseId] })
+    queryClient.invalidateQueries({ queryKey: ['doe-matches', effectiveCaseId] })
   }, [caseId, queryClient])
 
   const reviewCluster = useCallback(async (id: string, status: string) => {
@@ -1261,7 +1264,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, type: 'cluster', reviewerStatus: status }),
     })
-    queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+    queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
   }, [caseId, queryClient])
 
   const reviewStall = useCallback(async (id: string, status: string) => {
@@ -1270,7 +1273,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, type: 'stall', reviewerStatus: status }),
     })
-    queryClient.invalidateQueries({ queryKey: ['doe-stalls', caseId] })
+    queryClient.invalidateQueries({ queryKey: ['doe-stalls', effectiveCaseId] })
   }, [caseId, queryClient])
 
   const runConfirmSubmissions = useCallback(async () => {
@@ -1279,7 +1282,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'confirm_doe_submissions', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'confirm_doe_submissions', missingCaseId: effectiveCaseId }),
       })
     } finally { setConfirmRunning(false) }
   }, [caseId])
@@ -1290,9 +1293,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'same_date_cluster', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'same_date_cluster', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
     } finally { setSameDateRunning(false) }
   }, [caseId, queryClient])
 
@@ -1302,9 +1305,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'extract_entities', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'extract_entities', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-entities', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-entities', effectiveCaseId] })
     } finally { setEntitiesRunning(false) }
   }, [caseId, queryClient])
 
@@ -1314,9 +1317,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'name_dedup', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'name_dedup', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-entities', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-entities', effectiveCaseId] })
     } finally { setDedupRunning(false) }
   }, [caseId, queryClient])
 
@@ -1326,9 +1329,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'detect_stalls', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'detect_stalls', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-stalls', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-stalls', effectiveCaseId] })
     } finally { setStallsRunning(false) }
   }, [caseId, queryClient])
 
@@ -1338,9 +1341,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'location_runaway_cluster', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'location_runaway_cluster', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
     } finally { setLocationRunawayRunning(false) }
   }, [caseId, queryClient])
 
@@ -1350,9 +1353,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'corridor_cluster', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'corridor_cluster', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
     } finally { setCorridorRunning(false) }
   }, [caseId, queryClient])
 
@@ -1362,9 +1365,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       await fetch('/api/pattern/doe-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'age_bracket_cluster', missingCaseId: caseId }),
+        body: JSON.stringify({ action: 'age_bracket_cluster', missingCaseId: effectiveCaseId }),
       })
-      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
     } finally { setAgeBracketRunning(false) }
   }, [caseId, queryClient])
 
@@ -1744,7 +1747,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
           ) : (
             <div className="space-y-2">
               {clusters.map(c => (
-                <ClusterCard key={c.id} cluster={c} missingCaseId={caseId} onReview={reviewCluster} onSynthesize={synthesizeCluster} onReviewMember={reviewClusterMember} />
+                <ClusterCard key={c.id} cluster={c} missingCaseId={effectiveCaseId} onReview={reviewCluster} onSynthesize={synthesizeCluster} onReviewMember={reviewClusterMember} />
               ))}
             </div>
           )}
