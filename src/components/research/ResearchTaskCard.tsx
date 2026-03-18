@@ -470,7 +470,7 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                 {runMutation.isPending
                   ? <Loader2 className="h-3 w-3 animate-spin" />
                   : <Microscope className="h-3 w-3" />}
-                Dig deeper — run full agentic search loop
+                Dig deeper — full web search + Sonnet synthesis
               </Button>
             )}
             {task.status === 'awaiting_review' && canRun && (
