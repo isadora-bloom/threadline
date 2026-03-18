@@ -158,43 +158,73 @@ async function importCaseFile(
   console.log(`\nImporting "${config.title}"`)
   console.log(`  ${cases.length} records from ${config.file}`)
 
-  // ── Create the master Case ────────────────────────────────────────────────
-  const { data: caseRow, error: caseErr } = await supabase
+  // ── Find or create the master Case ───────────────────────────────────────
+  const { data: existingCase } = await supabase
     .from('cases')
-    .insert({
-      title: config.title,
-      case_type: config.caseType,
-      jurisdiction: 'United States / Canada',
-      status: 'active',
-      visibility_level: 'team',
-      created_by: userId,
-      notes: config.notes,
-    })
     .select('id')
+    .eq('title', config.title)
+    .order('created_at', { ascending: true })
+    .limit(1)
     .single()
 
-  if (caseErr || !caseRow) {
-    console.error(`  ✗ Failed to create case: ${caseErr?.message}`)
-    return
+  let caseId: string
+
+  if (existingCase) {
+    caseId = (existingCase as unknown as { id: string }).id
+    console.log(`  ✓ Case found (reusing): ${caseId}`)
+  } else {
+    const { data: caseRow, error: caseErr } = await supabase
+      .from('cases')
+      .insert({
+        title: config.title,
+        case_type: config.caseType,
+        jurisdiction: 'United States / Canada',
+        status: 'active',
+        visibility_level: 'team',
+        created_by: userId,
+        notes: config.notes,
+      })
+      .select('id')
+      .single()
+
+    if (caseErr || !caseRow) {
+      console.error(`  ✗ Failed to create case: ${caseErr?.message}`)
+      return
+    }
+
+    caseId = (caseRow as unknown as { id: string }).id
+    console.log(`  ✓ Case created: ${caseId}`)
+
+    await supabase.from('case_user_roles').insert({
+      case_id: caseId,
+      user_id: userId,
+      role: 'lead_investigator',
+    })
+    await supabase.from('case_pattern_settings').insert({
+      case_id: caseId,
+      proximity_radius_miles: 50,
+    })
   }
 
-  const caseId = caseRow.id
-  console.log(`  ✓ Case created: ${caseId}`)
-
-  // Assign role
-  await supabase.from('case_user_roles').insert({
-    case_id: caseId,
-    user_id: userId,
-    role: 'lead_investigator',
-  })
-
-  // Create case pattern settings
-  await supabase.from('case_pattern_settings').insert({
-    case_id: caseId,
-    proximity_radius_miles: 50,
-    temporal_window_days: 365,
-    cross_case_matching_enabled: true,
-  })
+  // ── Load already-imported DOE IDs for this case ───────────────────────────
+  const existingDoeIds = new Set<string>()
+  let page = 0
+  while (true) {
+    const { data: existing } = await supabase
+      .from('submissions')
+      .select('notes')
+      .eq('case_id', caseId)
+      .like('notes', 'Imported from Doe Network. Case #%')
+      .range(page * 1000, page * 1000 + 999)
+    if (!existing || existing.length === 0) break
+    for (const row of existing) {
+      const m = (row as unknown as { notes: string }).notes?.match(/Case #([^\s.]+)/)
+      if (m) existingDoeIds.add(m[1])
+    }
+    if (existing.length < 1000) break
+    page++
+  }
+  console.log(`  ${existingDoeIds.size} already imported — skipping those`)
 
   // ── Import each Doe case as a submission ──────────────────────────────────
   let subCreated = 0
@@ -204,6 +234,8 @@ async function importCaseFile(
 
   for (let i = 0; i < cases.length; i++) {
     const doe = cases[i]
+
+    if (existingDoeIds.has(String(doe.id))) continue
 
     if ((i + 1) % 25 === 0 || i === 0 || i === cases.length - 1) {
       console.log(`  Importing record ${i + 1} of ${cases.length}…`)
@@ -217,6 +249,7 @@ async function importCaseFile(
     const { data: submission, error: subErr } = await supabase
       .from('submissions')
       .insert({
+        case_id: caseId,
         raw_text: rawText,
         source_type: 'official_record',
         submitter_consent: 'on_record',
