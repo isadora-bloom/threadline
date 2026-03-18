@@ -46,6 +46,11 @@ interface ParsedCase {
   hair: string | null
   eyes: string | null
   marks: string | null
+  clothing: string | null     // "Last seen wearing" / clothing found with remains
+  jewelry: string | null      // jewelry / personal effects
+  dental: string | null       // dental record availability
+  dna: string | null          // DNA availability
+  fingerprints: string | null // fingerprint availability
   location: string | null
   state: string | null
   date: string | null
@@ -170,6 +175,17 @@ function parseSubmission(sub: RawSubmission): ParsedCase {
   const circMatch = r.match(/^Circumstances:\s*([\s\S]+?)(?:\nInformation Sources:|$)/mi)
   const circumstances = circMatch ? circMatch[1].trim() : null
 
+  const clothingRaw = parseLine(r, 'Clothing')
+  const clothing = clothingRaw && !/^unknown$/i.test(clothingRaw.trim()) ? clothingRaw : null
+  const jewelryRaw = parseLine(r, 'Jewelry', 'Additional Items')
+  const jewelry = jewelryRaw && !/^unknown$/i.test(jewelryRaw.trim()) ? jewelryRaw : null
+  const dentalRaw = parseLine(r, 'Dentals', 'Dental')
+  const dental = dentalRaw && !/^(unknown|not available|n\/a)$/i.test(dentalRaw.trim()) ? dentalRaw : null
+  const dnaRaw = parseLine(r, 'DNA', 'Dna')
+  const dna = dnaRaw && !/^(unknown|not available|n\/a)$/i.test(dnaRaw.trim()) ? dnaRaw : null
+  const fpRaw = parseLine(r, 'Fingerprints', 'Fingerprint')
+  const fingerprints = fpRaw && !/^(unknown|not available|n\/a)$/i.test(fpRaw.trim()) ? fpRaw : null
+
   return {
     submissionId: sub.id,
     doeId,
@@ -182,6 +198,11 @@ function parseSubmission(sub: RawSubmission): ParsedCase {
     hair:          parseLine(r, 'Hair'),
     eyes:          parseLine(r, 'Eyes'),
     marks:         parseLine(r, 'Distinguishing Marks'),
+    clothing,
+    jewelry,
+    dental,
+    dna,
+    fingerprints,
     location,
     state:         extractState(location),
     date:          dateStr,
@@ -310,11 +331,32 @@ const STATE_ADJACENT: Record<string, string[]> = {
 }
 
 const MARK_KEYWORDS = [
-  'tattoo','scar','birthmark','piercing','mole','brand',
-  'arm','leg','chest','back','neck','hand','shoulder','wrist','ankle','face','forehead',
+  // Physical marks
+  'tattoo','scar','birthmark','piercing','mole','brand','amputation','prosthetic','implant',
+  'surgical','operation','surgery','deformity','missing finger','missing tooth','gold tooth',
+  // Body locations
+  'arm','leg','chest','back','neck','hand','shoulder','wrist','ankle','face','forehead','abdomen','torso',
+  // Tattoo imagery
   'eagle','cross','rose','dragon','skull','snake','heart','star','butterfly','anchor',
-  'tribal','flag','military','name','initial','letter','number','portrait',
-  'left','right','upper','lower',
+  'tribal','flag','military','name','initial','letter','number','portrait','angel','devil',
+  'wing','sword','knife','gun','flower','tiger','wolf','bear','lion','phoenix','moon','sun',
+  // Directions/position
+  'left','right','upper','lower','inner','outer',
+  // Clothing
+  'jeans','pants','shorts','shirt','sweater','jacket','coat','dress','skirt','hoodie','vest',
+  'sneakers','boots','shoes','heels','sandals','slippers','loafers',
+  // Clothing brands
+  'nike','adidas','converse','vans','jordan','reebok','puma','levis','wrangler',
+  // Clothing descriptors
+  'torn','ripped','faded','striped','plaid','denim','flannel','polo','camouflage','camo',
+  'size','small','medium','large',
+  // Jewelry
+  'necklace','bracelet','ring','earring','watch','chain','locket','pendant','medallion',
+  'choker','bangle','anklet','brooch','cufflink',
+  // Jewelry materials
+  'gold','silver','diamond','engraved','inscription','initials','monogram',
+  // Colors (for clothing/jewelry matching)
+  'red','blue','green','black','white','gray','grey','brown','pink','purple','yellow','orange','maroon','navy',
 ]
 
 function scoreSex(a: ParsedCase, b: ParsedCase): SignalResult {
@@ -326,6 +368,8 @@ function scoreSex(a: ParsedCase, b: ParsedCase): SignalResult {
 
 function scoreRace(a: ParsedCase, b: ParsedCase): SignalResult {
   const ra = normRace(a.race), rb = normRace(b.race)
+  // Both genuinely unknown — doesn't confirm, but shouldn't count as zero evidence
+  if (!ra && !rb) return { score: 2, match: 'both_unknown' }
   if (!ra || !rb) return { score: 0, match: 'unknown' }
   if (ra === rb)  return { score: 12, match: 'exact' }
   const al = (a.race ?? '').toLowerCase(), bl = (b.race ?? '').toLowerCase()
@@ -421,29 +465,53 @@ function scoreWeight(a: ParsedCase, b: ParsedCase): SignalResult {
   return { score: 0, match: 'no_match' }
 }
 
-function scoreMarks(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: string[] } {
-  if (!a.marks && !b.marks) return { score: 0, match: 'none_mentioned', keywords: [] }
-  const norm = (s: string | null) => (s ?? '').toLowerCase()
-  const kA = MARK_KEYWORDS.filter(k => norm(a.marks).includes(k))
-  const kB = MARK_KEYWORDS.filter(k => norm(b.marks).includes(k))
+function scoreMarks(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: string[]; detail?: string } {
+  // Combine distinguishing marks + clothing + jewelry for matching
+  // These are all physical/material identifiers present on or with the person
+  const fullA = [a.marks, a.clothing, a.jewelry].filter(Boolean).join(' ')
+  const fullB = [b.marks, b.clothing, b.jewelry].filter(Boolean).join(' ')
+  if (!fullA && !fullB) return { score: 0, match: 'none_mentioned', keywords: [] }
+  const norm = (s: string) => s.toLowerCase()
+  const kA = MARK_KEYWORDS.filter(k => norm(fullA).includes(k))
+  const kB = MARK_KEYWORDS.filter(k => norm(fullB).includes(k))
   if (kA.length === 0 && kB.length === 0) return { score: 0, match: 'none_mentioned', keywords: [] }
   const shared = kA.filter(k => kB.includes(k))
   if (shared.length === 0) {
     if (kA.length > 0 && kB.length > 0) return { score: 2, match: 'both_have_marks', keywords: [] }
     return { score: 0, match: 'one_side_only', keywords: [] }
   }
+  // Build detail note about forensic availability
+  const forensicNotes: string[] = []
+  if (a.dental && a.dental.toLowerCase().includes('available')) forensicNotes.push('Missing: dentals available')
+  if (b.dental && b.dental.toLowerCase().includes('available')) forensicNotes.push('Unidentified: dentals available')
+  if (a.dna && !/not available/i.test(a.dna)) forensicNotes.push('Missing: DNA on file')
+  if (b.dna && !/not available/i.test(b.dna)) forensicNotes.push('Unidentified: DNA on file')
+  if (a.fingerprints && a.fingerprints.toLowerCase().includes('available')) forensicNotes.push('Missing: prints available')
+  if (b.fingerprints && b.fingerprints.toLowerCase().includes('available')) forensicNotes.push('Unidentified: prints available')
   return {
     score: Math.min(8, shared.length * 3),
     match: shared.length >= 3 ? 'strong_overlap' : 'partial_overlap',
     keywords: shared,
+    detail: forensicNotes.length ? forensicNotes.join('; ') : undefined,
   }
+}
+
+function forensicAvailabilityNote(a: ParsedCase, b: ParsedCase): string | null {
+  const notes: string[] = []
+  if (a.dental && a.dental.toLowerCase().includes('available')) notes.push('Missing: dental records available')
+  if (b.dental && b.dental.toLowerCase().includes('available')) notes.push('Unidentified: dental records available')
+  if (a.dna && !/not available/i.test(a.dna)) notes.push(`Missing: DNA — ${a.dna}`)
+  if (b.dna && !/not available/i.test(b.dna)) notes.push(`Unidentified: DNA — ${b.dna}`)
+  if (a.fingerprints && a.fingerprints.toLowerCase().includes('available')) notes.push('Missing: fingerprints available')
+  if (b.fingerprints && b.fingerprints.toLowerCase().includes('available')) notes.push('Unidentified: fingerprints available')
+  return notes.length ? notes.join('; ') : null
 }
 
 function scoreLocation(a: ParsedCase, b: ParsedCase): SignalResult {
   const sa = a.state, sb = b.state
   if (!sa || !sb) return { score: 0, match: 'unknown' }
   if (sa === sb) return { score: 10, match: 'same_state', detail: sa }
-  if (STATE_ADJACENT[sa]?.includes(sb)) return { score: 5, match: 'adjacent_state', detail: `${sa}↔${sb}` }
+  if (STATE_ADJACENT[sa]?.includes(sb) || STATE_ADJACENT[sb]?.includes(sa)) return { score: 5, match: 'adjacent_state', detail: `${sa}↔${sb}` }
   return { score: 0, match: 'different_state' }
 }
 
@@ -520,6 +588,12 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
     composite >= 56 ? 'strong' :
     composite >= 39 ? 'notable' :
     composite >= 22 ? 'moderate' : 'weak'
+
+  // Add forensic availability note — tells investigator if dental/DNA/prints can confirm this match
+  const forensicNote = forensicAvailabilityNote(missing, unidentified)
+  if (forensicNote) {
+    (signals as Record<string, unknown>).forensic_availability = { note: forensicNote }
+  }
 
   return { signals, composite, grade, eliminated: false }
 }
