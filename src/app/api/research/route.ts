@@ -17,9 +17,19 @@ export async function GET(req: NextRequest) {
     .single()
   if (!role) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  // Auto-reset tasks stuck as 'running' for more than 3 minutes
+  // (happens when a Vercel function is killed by timeout before it can save)
+  const stuckCutoff = new Date(Date.now() - 3 * 60 * 1000).toISOString()
+  await supabase
+    .from('research_tasks')
+    .update({ status: 'queued' } as never)
+    .eq('case_id', caseId)
+    .eq('status', 'running')
+    .lt('started_at', stuckCutoff)
+
   const { data, error } = await supabase
     .from('research_tasks')
-    .select('id, question, status, trigger_type, trigger_ref_type, confidence_summary, created_at, completed_at, created_by')
+    .select('*')
     .eq('case_id', caseId)
     .order('created_at', { ascending: false })
 
@@ -61,7 +71,7 @@ export async function POST(req: NextRequest) {
       trigger_ref_type: trigger_ref_type || null,
       status: 'queued',
       created_by: user.id,
-    })
+    } as never)
     .select()
     .single()
 

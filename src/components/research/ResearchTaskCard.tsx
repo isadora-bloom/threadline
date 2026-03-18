@@ -99,6 +99,7 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
   const [open, setOpen] = useState(task.status === 'awaiting_review')
   const [logOpen, setLogOpen] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const [runError, setRunError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Auto-open when results arrive after a run
@@ -121,6 +122,7 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
 
   const runMutation = useMutation({
     mutationFn: async (deep = false) => {
+      setRunError(null)
       const res = await fetch(`/api/research/${task.id}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -136,7 +138,8 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
     },
-    onError: () => {
+    onError: (err: Error) => {
+      setRunError(err.message)
       queryClient.invalidateQueries({ queryKey: ['research-tasks', task.case_id] })
     },
   })
@@ -198,7 +201,10 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                 <span className="text-[10px] text-slate-400">{formatDate(task.created_at)}</span>
               </div>
               <p className="text-sm font-medium text-slate-900 leading-snug">{task.question}</p>
-              {task.confidence_summary && (
+              {runError && (
+                <p className="text-xs text-red-600 mt-1">{runError}</p>
+              )}
+              {!runError && task.confidence_summary && (
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">{task.confidence_summary}</p>
               )}
             </div>
@@ -436,7 +442,14 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
               </Collapsible>
             ) : null}
 
-            {/* Error */}
+            {/* Run error */}
+            {runError && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                {runError}
+              </p>
+            )}
+
+            {/* Saved error */}
             {task.error_message && (
               <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">
                 {task.error_message}
