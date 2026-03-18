@@ -159,10 +159,13 @@ const MATCH_DOT: Record<string, string> = {
   adjacent_state:'bg-emerald-400',
   unknown:       'bg-slate-300',
   no_match:      'bg-red-300',
-  mismatch:      'bg-red-500',
-  none_mentioned:'bg-slate-200',
-  one_side_only: 'bg-slate-200',
-  incompatible:  'bg-red-400',
+  mismatch:         'bg-red-500',
+  none_mentioned:   'bg-slate-200',
+  one_side_only:    'bg-slate-200',
+  incompatible:     'bg-red-500',
+  distant:          'bg-slate-300',
+  both_parous:      'bg-emerald-400',
+  both_nulliparous: 'bg-blue-300',
 }
 
 function SignalBar({ label, signal, icon: Icon }: {
@@ -223,15 +226,16 @@ const SIGNAL_CATEGORY_STYLE: Record<string, string> = {
 }
 
 const SIGNAL_DEFS: { key: string; label: string; Icon: ComponentType<{ className?: string }> }[] = [
-  { key: 'sex',      label: 'Sex',    Icon: User },
-  { key: 'race',     label: 'Race',   Icon: Globe },
-  { key: 'age',      label: 'Age',    Icon: Calendar },
-  { key: 'hair',     label: 'Hair',   Icon: Scissors },
-  { key: 'eyes',     label: 'Eyes',   Icon: Eye },
-  { key: 'height',   label: 'Height', Icon: Ruler },
-  { key: 'weight',   label: 'Weight', Icon: Scale },
-  { key: 'marks',    label: 'Marks',  Icon: Fingerprint },
-  { key: 'location', label: 'State',  Icon: MapPin },
+  { key: 'sex',        label: 'Sex',        Icon: User },
+  { key: 'race',       label: 'Race',       Icon: Globe },
+  { key: 'age',        label: 'Age',        Icon: Calendar },
+  { key: 'hair',       label: 'Hair',       Icon: Scissors },
+  { key: 'eyes',       label: 'Eyes',       Icon: Eye },
+  { key: 'height',     label: 'Height',     Icon: Ruler },
+  { key: 'weight',     label: 'Weight',     Icon: Scale },
+  { key: 'marks',      label: 'Marks',      Icon: Fingerprint },
+  { key: 'location',   label: 'State',      Icon: MapPin },
+  { key: 'childbirth', label: 'Childbirth', Icon: Users },
 ]
 
 function countPositiveSignals(signals: DoeMatchCandidate['signals']): number {
@@ -399,15 +403,16 @@ function MatchCard({ match, onReview }: {
             <div>
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Signal breakdown</p>
               <div className="space-y-1.5">
-                <SignalBar label="Sex"     signal={match.signals.sex}      icon={User} />
-                <SignalBar label="Race"    signal={match.signals.race}     icon={Globe} />
-                <SignalBar label="Age"     signal={match.signals.age}      icon={Calendar} />
-                <SignalBar label="Hair"    signal={match.signals.hair}     icon={Scissors} />
-                <SignalBar label="Eyes"    signal={match.signals.eyes}     icon={Eye} />
-                <SignalBar label="Height"  signal={match.signals.height}   icon={Ruler} />
-                <SignalBar label="Weight"  signal={match.signals.weight}   icon={Scale} />
-                <SignalBar label="Marks"   signal={match.signals.marks}    icon={Fingerprint} />
-                <SignalBar label="State"   signal={match.signals.location} icon={MapPin} />
+                <SignalBar label="Sex"         signal={match.signals.sex}                                     icon={User} />
+                <SignalBar label="Race"        signal={match.signals.race}                                    icon={Globe} />
+                <SignalBar label="Age"         signal={match.signals.age}                                     icon={Calendar} />
+                <SignalBar label="Hair"        signal={match.signals.hair}                                    icon={Scissors} />
+                <SignalBar label="Eyes"        signal={match.signals.eyes}                                    icon={Eye} />
+                <SignalBar label="Height"      signal={match.signals.height}                                  icon={Ruler} />
+                <SignalBar label="Weight"      signal={match.signals.weight}                                  icon={Scale} />
+                <SignalBar label="Marks"       signal={match.signals.marks}                                   icon={Fingerprint} />
+                <SignalBar label="State"       signal={match.signals.location}                                icon={MapPin} />
+                <SignalBar label="Childbirth"  signal={match.signals.childbirth as typeof match.signals.sex}  icon={Users} />
               </div>
             </div>
 

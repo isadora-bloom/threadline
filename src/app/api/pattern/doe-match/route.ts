@@ -52,6 +52,7 @@ interface ParsedCase {
   clothing: string | null     // "Last seen wearing" / clothing found with remains
   jewelry: string | null      // jewelry / personal effects
   dental: string | null       // dental record availability
+  childbirth: 'evidence' | 'no_evidence' | 'unknown'  // forensic/stated childbirth status
   dna: string | null          // DNA availability
   fingerprints: string | null // fingerprint availability
   location: string | null
@@ -81,6 +82,7 @@ interface MatchSignals {
   weight:        SignalResult
   marks:         SignalResult & { keywords?: string[] }
   location:      SignalResult
+  childbirth:    SignalResult
   body_state?:   { state: BodyState; note: string | null; weight_applied: boolean }
 }
 
@@ -151,6 +153,12 @@ function parseBodyState(rawText: string): BodyState {
   return 'unknown'
 }
 
+function parseChildbirthStatus(rawText: string): 'evidence' | 'no_evidence' | 'unknown' {
+  if (/no signs of childbirth|nulliparous|never had children|no evidence of childbirth|not believed to have (had|given birth)|never gave birth/i.test(rawText)) return 'no_evidence'
+  if (/signs of childbirth|parous\b|gave birth|has children|mother of \d|had child|evidence of (pregnancy|childbirth)|was pregnant|evidence of giving birth|evidence of having given birth/i.test(rawText)) return 'evidence'
+  return 'unknown'
+}
+
 function parseSubmission(sub: RawSubmission): ParsedCase {
   const r = sub.raw_text
   const location = parseLine(r, 'Last Seen', 'Location Found', 'Location of Discovery', 'Location Last Seen')
@@ -212,8 +220,9 @@ function parseSubmission(sub: RawSubmission): ParsedCase {
     month,
     year,
     circumstances,
-    bodyState:     parseBodyState(r),
+    bodyState:      parseBodyState(r),
     stateOfRemains: parseLine(r, 'State of Remains'),
+    childbirth:     parseChildbirthStatus(r),
   }
 }
 
@@ -288,7 +297,7 @@ const DECOMP_NOTES: Record<BodyState, string | null> = {
   unknown:  null,
 }
 
-const MAX_SIGNAL_SCORES = { sex: 15, race: 12, age: 15, hair: 8, eyes: 8, height: 8, weight: 5, marks: 8, location: 10 }
+const MAX_SIGNAL_SCORES = { sex: 15, race: 12, age: 15, hair: 8, eyes: 8, height: 8, weight: 5, marks: 8, location: 10, childbirth: 8 }
 const MAX_POSSIBLE_BASE = Object.values(MAX_SIGNAL_SCORES).reduce((a, b) => a + b, 0)  // 89
 
 // ─── Scorers ──────────────────────────────────────────────────────────────────
@@ -412,7 +421,9 @@ function scoreRace(a: ParsedCase, b: ParsedCase): SignalResult {
   const aG = groups.filter(g => RACE_GROUPS[g].some(t => al.includes(t)))
   const bG = groups.filter(g => RACE_GROUPS[g].some(t => bl.includes(t)))
   if (aG.some(g => bG.includes(g))) return { score: 6, match: 'partial' }
-  return { score: 0, match: 'no_match' }
+  // Both races are known and belong to distinct groups — penalise but do not hard-eliminate
+  // (race misclassification in records is a known issue, especially in older cases)
+  return { score: -15, match: 'mismatch' }
 }
 
 function scoreAge(missing: ParsedCase, unidentified: ParsedCase): SignalResult {
@@ -429,7 +440,9 @@ function scoreAge(missing: ParsedCase, unidentified: ParsedCase): SignalResult {
   if (diff <= 3)  return { score: 15, match: 'very_close', detail: `±${Math.round(diff)}yr` }
   if (diff <= 7)  return { score: 10, match: 'close',      detail: `±${Math.round(diff)}yr` }
   if (diff <= 12) return { score: 5,  match: 'possible',   detail: `±${Math.round(diff)}yr` }
-  return { score: 2, match: 'overlap', detail: `±${Math.round(diff)}yr` }
+  if (diff <= 20) return { score: 0,  match: 'distant',    detail: `±${Math.round(diff)}yr` }
+  // > 20yr midpoint gap — eliminate even if age ranges nominally overlap at their extremes
+  return { score: -10, match: 'incompatible', detail: `±${Math.round(diff)}yr` }
 }
 
 function scoreHair(a: ParsedCase, b: ParsedCase): SignalResult {
@@ -623,6 +636,20 @@ function scoreLocation(a: ParsedCase, b: ParsedCase): SignalResult {
   return { score: 0, match: 'different_state' }
 }
 
+// Childbirth / parity status — forensic bone analysis can detect signs of childbirth,
+// and MP records often note whether a person has children. A confirmed mismatch
+// (one clearly parous, one clearly nulliparous) is a strong negative indicator.
+function scoreChildbirth(a: ParsedCase, b: ParsedCase): SignalResult {
+  const ca = a.childbirth, cb = b.childbirth
+  if (ca === 'unknown' || cb === 'unknown') return { score: 0, match: 'unknown' }
+  if (ca === cb) {
+    return ca === 'evidence'
+      ? { score: 8, match: 'both_parous',      detail: 'both show signs of childbirth' }
+      : { score: 5, match: 'both_nulliparous', detail: 'neither shows signs of childbirth' }
+  }
+  return { score: -20, match: 'mismatch', detail: 'one parous, one nulliparous — strong negative' }
+}
+
 // ─── Composite score with decomposition adjustment ────────────────────────────
 
 function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
@@ -645,7 +672,7 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
     unidentified.year < missing.year - 1
   ) {
     return {
-      signals: { sex: { score: 0, match: 'n/a' }, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' } },
+      signals: { sex: { score: 0, match: 'n/a' }, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } },
       composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'chronologically_impossible',
     }
   }
@@ -653,7 +680,7 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   const sexSig = scoreSex(missing, unidentified)
   if (sexSig.score < -100 && !uniqueId.overridesElimination) {
     return {
-      signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' } },
+      signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } },
       composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'sex_mismatch',
     }
   }
@@ -661,21 +688,22 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   const ageSig = scoreAge(missing, unidentified)
   if (ageSig.score < -5 && !uniqueId.overridesElimination) {
     return {
-      signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: ageSig, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' } },
+      signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: ageSig, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } },
       composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'age_incompatible',
     }
   }
 
   const rawSignals: MatchSignals = {
-    sex:      sexSig,
-    race:     scoreRace(missing, unidentified),
-    age:      ageSig,
-    hair:     scoreHair(missing, unidentified),
-    eyes:     scoreEyes(missing, unidentified),
-    height:   scoreHeight(missing, unidentified),
-    weight:   scoreWeight(missing, unidentified),
-    marks:    scoreMarks(missing, unidentified),
-    location: scoreLocation(missing, unidentified),
+    sex:        sexSig,
+    race:       scoreRace(missing, unidentified),
+    age:        ageSig,
+    hair:       scoreHair(missing, unidentified),
+    eyes:       scoreEyes(missing, unidentified),
+    height:     scoreHeight(missing, unidentified),
+    weight:     scoreWeight(missing, unidentified),
+    marks:      scoreMarks(missing, unidentified),
+    location:   scoreLocation(missing, unidentified),
+    childbirth: scoreChildbirth(missing, unidentified),
   }
 
   // Apply body state decomposition weighting
@@ -716,13 +744,14 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
     }
   }
 
+  // Include negative scores (race mismatch, childbirth mismatch, age gap) — they lower the composite
   const rawScore = Object.entries(signals)
     .filter(([k]) => !['body_state', 'forensic_availability', 'unique_identifier'].includes(k))
-    .reduce((sum, [, s]) => sum + ((s as SignalResult).score > 0 ? (s as SignalResult).score : 0), 0)
+    .reduce((sum, [, s]) => sum + (s as SignalResult).score, 0)
 
   // Apply unique identifier bonus on top — it's additive and not subject to decomp scaling
   const identifierBonus = uniqueId.score
-  const composite = Math.round(Math.min(100, ((rawScore + identifierBonus) / adjustedMax) * 100))
+  const composite = Math.round(Math.max(0, Math.min(100, ((rawScore + identifierBonus) / adjustedMax) * 100)))
   const grade =
     composite >= 73 ? 'very_strong' :
     composite >= 56 ? 'strong' :
@@ -947,20 +976,38 @@ export async function POST(req: NextRequest) {
     const missingSubIds = missingParsed.map(p => p.submissionId)
     const { data: existingMatches } = await supabase
       .from('doe_match_candidates' as never)
-      .select('missing_submission_id, unidentified_submission_id')
+      .select('missing_submission_id, unidentified_submission_id, reviewer_status')
       .in('missing_submission_id', missingSubIds)
 
-    const existingPairs = new Set(
-      ((existingMatches ?? []) as Array<{ missing_submission_id: string; unidentified_submission_id: string }>)
+    type ExistingMatch = { missing_submission_id: string; unidentified_submission_id: string; reviewer_status: string }
+    const existingList = (existingMatches ?? []) as ExistingMatch[]
+
+    // Only skip pairs that have been human-reviewed — unreviewed pairs will be rescored
+    const reviewedPairs = new Set(
+      existingList
+        .filter(e => e.reviewer_status !== 'unreviewed')
         .map(e => `${e.missing_submission_id}__${e.unidentified_submission_id}`)
     )
+    // Delete existing unreviewed pairs for this batch so we can reinsert with corrected scores
+    const unreviewedSubIds = [...new Set(
+      existingList.filter(e => e.reviewer_status === 'unreviewed').map(e => e.missing_submission_id)
+    )]
+    if (unreviewedSubIds.length > 0) {
+      for (let i = 0; i < unreviewedSubIds.length; i += 50) {
+        await supabase
+          .from('doe_match_candidates' as never)
+          .delete()
+          .in('missing_submission_id', unreviewedSubIds.slice(i, i + 50) as never)
+          .eq('reviewer_status', 'unreviewed')
+      }
+    }
 
     const toInsert: object[] = []
     let eliminated = 0
 
     for (const missing of missingParsed) {
       for (const uid of unidentifiedParsed) {
-        if (existingPairs.has(`${missing.submissionId}__${uid.submissionId}`)) continue
+        if (reviewedPairs.has(`${missing.submissionId}__${uid.submissionId}`)) continue
         const result = scoreMatch(missing, uid)
         if (result.eliminated) { eliminated++; continue }
         if (result.composite < 22) continue
@@ -1002,7 +1049,7 @@ export async function POST(req: NextRequest) {
         .from('doe_match_candidates' as never)
         .upsert(toInsert.slice(i, i + 100) as never, {
           onConflict: 'missing_submission_id,unidentified_submission_id',
-          ignoreDuplicates: true,
+          ignoreDuplicates: false,
         })
       if (!error) inserted += Math.min(100, toInsert.length - i)
     }

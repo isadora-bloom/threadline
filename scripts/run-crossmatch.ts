@@ -32,6 +32,7 @@ interface ParsedCase {
   location: string | null; state: string | null; date: string | null; month: number | null
   year: number | null; circumstances: string | null
   bodyState: BodyState; stateOfRemains: string | null
+  childbirth: 'evidence' | 'no_evidence' | 'unknown'
 }
 interface Sig { score: number; match: string; detail?: string; keywords?: string[] }
 
@@ -107,6 +108,9 @@ function parseSubmission(sub: RawSub): ParsedCase {
     location, state: extractState(location), date: dateStr, month, year,
     circumstances: circMatch ? circMatch[1].trim() : null,
     bodyState: parseBodyState(r), stateOfRemains: parseLine(r, 'State of Remains'),
+    childbirth: /no signs of childbirth|nulliparous|never had children|not believed to have (had|given birth)|never gave birth/i.test(r) ? 'no_evidence'
+      : /signs of childbirth|parous\b|gave birth|has children|mother of \d|had child|evidence of (pregnancy|childbirth)|was pregnant|evidence of giving birth/i.test(r) ? 'evidence'
+      : 'unknown',
   }
 }
 
@@ -122,7 +126,7 @@ const DECOMP_WEIGHTS: Record<BodyState, { hair: number; eyes: number; weight: nu
   partial: { hair:0.3, eyes:0.1, weight:0.2, marks:0.4 },
   unknown: { hair:0.8, eyes:0.8, weight:0.8, marks:0.8 },
 }
-const MAX_SCORES = { sex:15, race:12, age:15, hair:8, eyes:8, height:8, weight:5, marks:8, location:10 }
+const MAX_SCORES = { sex:15, race:12, age:15, hair:8, eyes:8, height:8, weight:5, marks:8, location:10, childbirth:8 }
 const MAX_BASE = Object.values(MAX_SCORES).reduce((a,b) => a+b, 0) // 89
 
 const RACE_GROUPS: Record<string, string[]> = {
@@ -241,7 +245,7 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
     const gs = Object.keys(RACE_GROUPS)
     const aG = gs.filter(g => RACE_GROUPS[g].some(t => al.includes(t)))
     const bG = gs.filter(g => RACE_GROUPS[g].some(t => bl.includes(t)))
-    return aG.some(g => bG.includes(g)) ? 6 : 0
+    return aG.some(g => bG.includes(g)) ? 6 : -15  // clear group mismatch → penalise
   })()
 
   // Age
@@ -250,7 +254,7 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
     let adj = ma as [number,number]
     if (m.year && u.year && u.year > m.year) { const e = u.year - m.year; adj = [ma[0]+e, ma[1]+e] }
     const diff = Math.abs((adj[0]+adj[1])/2 - (ua[0]+ua[1])/2)
-    ageScore = diff <= 3 ? 15 : diff <= 7 ? 10 : diff <= 12 ? 5 : 2
+    ageScore = diff <= 3 ? 15 : diff <= 7 ? 10 : diff <= 12 ? 5 : diff <= 20 ? 0 : -10
     ageDet = `±${Math.round(diff)}yr`
   }
 
@@ -299,20 +303,27 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
     (1-w.weight)*MAX_SCORES.weight + (1-w.marks)*MAX_SCORES.marks
   const adjustedMax = Math.max(30, MAX_BASE - Math.round(deductedMax))
 
-  const rawScore = sexScore + raceScore + ageScore + hair + eyes + heightScore + weight + marks + locationScore
-  const composite = Math.round(Math.min(100, (Math.max(0, rawScore + uniqueId.score) / adjustedMax) * 100))
+  // Childbirth / parity — forensic bone analysis or stated history
+  const ca = m.childbirth, cb = u.childbirth
+  const childbirthScore = (ca === 'unknown' || cb === 'unknown') ? 0
+    : ca === cb ? (ca === 'evidence' ? 8 : 5)
+    : -20
+
+  const rawScore = sexScore + raceScore + ageScore + hair + eyes + heightScore + weight + marks + locationScore + childbirthScore
+  const composite = Math.round(Math.max(0, Math.min(100, ((rawScore + uniqueId.score) / adjustedMax) * 100)))
   const grade = composite >= 73 ? 'very_strong' : composite >= 56 ? 'strong' : composite >= 39 ? 'notable' : composite >= 22 ? 'moderate' : 'weak'
 
   const signals: Record<string, unknown> = {
     sex:      { score: sexScore,    match: !sa||!sb ? 'unknown' : sa===sb ? 'exact' : 'mismatch' },
-    race:     { score: raceScore,   match: !ra&&!rb ? 'both_unknown' : !ra||!rb ? 'unknown' : ra===rb ? 'exact' : raceScore===6 ? 'partial' : 'no_match' },
-    age:      { score: ageScore,    match: ageScore===15?'very_close':ageScore===10?'close':ageScore===5?'possible':ageScore===2?'overlap':'unknown', detail: ageDet },
+    race:     { score: raceScore,   match: !ra&&!rb ? 'both_unknown' : !ra||!rb ? 'unknown' : ra===rb ? 'exact' : raceScore===6 ? 'partial' : 'mismatch' },
+    age:      { score: ageScore,    match: ageScore===15?'very_close':ageScore===10?'close':ageScore===5?'possible':ageScore===0?'distant':ageScore===-10?'incompatible':'unknown', detail: ageDet },
     hair:     { score: hair,        match: !ha||!hb ? 'unknown' : hairRaw===8 ? 'exact' : hairRaw===3 ? 'adjacent' : 'no_match' },
     eyes:     { score: eyes,        match: !ea||!eb ? 'unknown' : eyesRaw===8 ? 'exact' : eyesRaw===3 ? 'adjacent' : 'no_match' },
     height:   { score: heightScore, match: heightScore===8?'exact':heightScore===6?'very_close':heightScore===4?'close':heightScore===2?'possible':!ia||!ib?'unknown':'no_match' },
     weight:   { score: weight,      match: weightRaw===5?'exact':weightRaw===3?'close':weightRaw===1?'possible':!wa||!wb?'unknown':'no_match' },
     marks:    { score: marks,       match: shared.length>=3?'strong_overlap':shared.length>0?'partial_overlap':kA.length>0&&kB.length>0?'both_have_marks':!m.marks&&!u.marks?'none_mentioned':'one_side_only', keywords: shared },
-    location: { score: locationScore, match: !m.state||!u.state?'unknown':m.state===u.state?'same_state':locationScore===5?'adjacent_state':'different_state' },
+    location:   { score: locationScore,   match: !m.state||!u.state?'unknown':m.state===u.state?'same_state':locationScore===5?'adjacent_state':'different_state' },
+    childbirth: { score: childbirthScore, match: (ca==='unknown'||cb==='unknown')?'unknown':ca===cb?(ca==='evidence'?'both_parous':'both_nulliparous'):'mismatch' },
     body_state: { state: u.bodyState, note: null, weight_applied: u.bodyState !== 'intact' && u.bodyState !== 'unknown' },
   }
 
