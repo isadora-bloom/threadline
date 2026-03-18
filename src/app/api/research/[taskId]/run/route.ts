@@ -4,7 +4,10 @@ import Anthropic from '@anthropic-ai/sdk'
 
 export const maxDuration = 120 // Vercel Pro allows up to 300s; this gives the loop room to breathe
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  timeout: 60_000, // 60s — prevents the call from hanging indefinitely
+})
 
 const MAX_ROUNDS = 3          // max iterations of the search loop
 const QUERIES_PER_ROUND = 5   // initial round
@@ -109,6 +112,13 @@ export async function POST(
   { params }: { params: Promise<{ taskId: string }> }
 ) {
   const { taskId } = await params
+
+  // Fail fast if the Anthropic API key isn't configured
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error('[research/run] ANTHROPIC_API_KEY is not set in environment')
+    return NextResponse.json({ error: 'AI service not configured' }, { status: 503 })
+  }
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -191,10 +201,9 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
     const sourcesConsulted = [{ name: 'Case records + AI training knowledge', url: null, type: 'training_knowledge', relevance: task.question }]
 
     try {
-      console.log('[research/run] Starting fast mode for task:', taskId, 'question:', task.question.slice(0, 80))
       const resp = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
+        max_tokens: 8192,
         tools: [{
           name: 'submit_research_findings',
           description: 'Submit structured research findings for this investigative question',
@@ -241,11 +250,8 @@ INSTRUCTIONS:
 5. Never fabricate sources. Flag uncertainty where it exists.`,
         }],
       })
-      console.log('[research/run] Anthropic response stop_reason:', resp.stop_reason, 'content blocks:', resp.content.length, 'types:', resp.content.map(b => b.type).join(','))
       const toolUse = resp.content.find(b => b.type === 'tool_use')
-      console.log('[research/run] Tool use block found:', !!toolUse)
       if (toolUse?.type === 'tool_use') {
-        console.log('[research/run] Tool input keys:', Object.keys(toolUse.input as object))
         const input = toolUse.input as {
           confirmed: string[]
           probable: string[]
@@ -267,7 +273,6 @@ INSTRUCTIONS:
       console.error('[research/run] Fast research error:', err)
       confidenceSummary = 'Research failed. Try again or use Dig Deeper.'
     }
-    console.log('[research/run] Saving fast mode result. findings:', !!findings, 'confidenceSummary length:', confidenceSummary.length)
 
     const { data: updated, error: updateErr } = await supabase
       .from('research_tasks')
@@ -457,7 +462,7 @@ Return JSON only (no preamble, no markdown):
   try {
     const synthResp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 8192,
       tools: [{
         name: 'submit_synthesis',
         description: 'Submit the final synthesized research report',
