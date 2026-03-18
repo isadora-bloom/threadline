@@ -16,7 +16,7 @@ import {
   CheckCircle, XCircle, Clock, RefreshCw, Sparkles,
   User, MapPin, Calendar, Eye, Scissors, Scale, Ruler,
   Skull, Flame, Brain, Car, UserX, Search, ShieldAlert,
-  Fingerprint, Globe, Hash,
+  Fingerprint, Globe,
 } from 'lucide-react'
 
 interface DoeMatchCandidate {
@@ -1272,7 +1272,10 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
           {totalMatches > PAGE_SIZE && (
             <div className="flex items-center justify-between pt-2">
               <p className="text-xs text-slate-400">
-                Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalMatches)} of {totalMatches.toLocaleString()} candidates
+                {signalCountFilter > 0
+                  ? `${matches.length} of ${PAGE_SIZE} loaded — showing ${signalCountFilter}+ signal matches`
+                  : `Showing ${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, totalMatches)} of ${totalMatches.toLocaleString()} candidates`
+                }
               </p>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page === 0}
