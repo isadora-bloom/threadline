@@ -4,11 +4,6 @@ import Anthropic from '@anthropic-ai/sdk'
 
 export const maxDuration = 120 // Vercel Pro allows up to 300s; this gives the loop room to breathe
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  timeout: 60_000, // 60s — prevents the call from hanging indefinitely
-})
-
 const MAX_ROUNDS = 3          // max iterations of the search loop
 const QUERIES_PER_ROUND = 5   // initial round
 const FOLLOWUPS_PER_ROUND = 3 // follow-up rounds
@@ -114,10 +109,14 @@ export async function POST(
   const { taskId } = await params
 
   // Fail fast if the Anthropic API key isn't configured
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
     console.error('[research/run] ANTHROPIC_API_KEY is not set in environment')
-    return NextResponse.json({ error: 'AI service not configured' }, { status: 503 })
+    return NextResponse.json({ error: 'AI service not configured — ANTHROPIC_API_KEY missing' }, { status: 503 })
   }
+
+  // Create client inside the handler so a missing key never crashes the module
+  const anthropic = new Anthropic({ apiKey, timeout: 60_000 })
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

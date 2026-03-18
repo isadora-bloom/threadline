@@ -129,7 +129,7 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
         body: JSON.stringify({ deep }),
       })
       if (!res.ok) {
-        let msg = 'Run failed'
+        let msg = `Run failed (${res.status})`
         try { const err = await res.json(); msg = err.error ?? msg } catch {}
         throw new Error(msg)
       }
@@ -180,7 +180,9 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
     },
   })
 
-  const statusCfg = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.queued
+  // Show running state immediately when mutation is in-flight (optimistic UI)
+  const effectiveStatus = runMutation.isPending ? 'running' : task.status
+  const statusCfg = STATUS_CONFIG[effectiveStatus] ?? STATUS_CONFIG.queued
   const StatusIcon = statusCfg.icon
 
   return (
