@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, type ComponentType } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import {
   CheckCircle, XCircle, Clock, RefreshCw, Sparkles,
   User, MapPin, Calendar, Eye, Scissors, Scale, Ruler,
   Skull, Flame, Brain, Car, UserX, Search, ShieldAlert,
+  Fingerprint, Globe, Hash,
 } from 'lucide-react'
 
 interface DoeMatchCandidate {
@@ -204,6 +205,26 @@ const SIGNAL_CATEGORY_STYLE: Record<string, string> = {
   investigative:    'bg-slate-50 text-slate-700 border-slate-200',
 }
 
+const SIGNAL_DEFS: { key: string; label: string; Icon: ComponentType<{ className?: string }> }[] = [
+  { key: 'sex',      label: 'Sex',    Icon: User },
+  { key: 'race',     label: 'Race',   Icon: Globe },
+  { key: 'age',      label: 'Age',    Icon: Calendar },
+  { key: 'hair',     label: 'Hair',   Icon: Scissors },
+  { key: 'eyes',     label: 'Eyes',   Icon: Eye },
+  { key: 'height',   label: 'Height', Icon: Ruler },
+  { key: 'weight',   label: 'Weight', Icon: Scale },
+  { key: 'marks',    label: 'Marks',  Icon: Fingerprint },
+  { key: 'location', label: 'State',  Icon: MapPin },
+]
+
+function countPositiveSignals(signals: DoeMatchCandidate['signals']): number {
+  const noData = ['unknown', 'no_match', 'not_available', 'no_data', 'missing']
+  return SIGNAL_DEFS.filter(({ key }) => {
+    const s = signals[key]
+    return s && s.score > 0 && !noData.includes(s.match)
+  }).length
+}
+
 function MatchCard({ match, onReview }: {
   match: DoeMatchCandidate
   onReview: (id: string, status: string, note?: string) => void
@@ -232,6 +253,7 @@ function MatchCard({ match, onReview }: {
                   <Badge className={`text-[9px] px-1 py-0 ${GRADE_COLOR[match.grade]}`}>
                     {GRADE_LABEL[match.grade]}
                   </Badge>
+                  <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{countPositiveSignals(match.signals)}/9</div>
                 </div>
 
                 {/* People */}
@@ -289,6 +311,25 @@ function MatchCard({ match, onReview }: {
                 </div>
               </div>
 
+              {/* Signal dot strip */}
+              <div className="flex gap-1 mt-2">
+                {SIGNAL_DEFS.map(({ key, label, Icon }) => {
+                  const s = match.signals[key]
+                  const noData = ['unknown', 'no_match', 'not_available', 'no_data', 'missing']
+                  const active = s && s.score > 0 && !noData.includes(s.match)
+                  return (
+                    <div
+                      key={key}
+                      title={`${label}: ${s?.match ?? 'no data'}${s?.detail ? ' — ' + s.detail : ''}`}
+                      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium
+                        ${active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-300 border border-slate-100'}`}
+                    >
+                      <Icon className="h-2.5 w-2.5" />
+                    </div>
+                  )
+                })}
+              </div>
+
               {/* Body state warning (if significant decomposition) */}
               {(() => {
                 const bs = match.signals.body_state as unknown as { state: string; note: string | null } | undefined
@@ -319,13 +360,13 @@ function MatchCard({ match, onReview }: {
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Signal breakdown</p>
               <div className="space-y-1.5">
                 <SignalBar label="Sex"     signal={match.signals.sex}      icon={User} />
-                <SignalBar label="Race"    signal={match.signals.race}     icon={User} />
+                <SignalBar label="Race"    signal={match.signals.race}     icon={Globe} />
                 <SignalBar label="Age"     signal={match.signals.age}      icon={Calendar} />
                 <SignalBar label="Hair"    signal={match.signals.hair}     icon={Scissors} />
                 <SignalBar label="Eyes"    signal={match.signals.eyes}     icon={Eye} />
                 <SignalBar label="Height"  signal={match.signals.height}   icon={Ruler} />
                 <SignalBar label="Weight"  signal={match.signals.weight}   icon={Scale} />
-                <SignalBar label="Marks"   signal={match.signals.marks}    icon={GitMerge} />
+                <SignalBar label="Marks"   signal={match.signals.marks}    icon={Fingerprint} />
                 <SignalBar label="State"   signal={match.signals.location} icon={MapPin} />
               </div>
             </div>
@@ -737,6 +778,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity'>('all')
   const [stallTypeFilter, setStallTypeFilter] = useState<'all' | 'voluntary_misclassification' | 'runaway_no_followup' | 'quick_closure_young'>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
+  const [signalCountFilter, setSignalCountFilter] = useState(0)
 
   const supabase = createClient()
 
@@ -980,7 +1022,10 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     } finally { setStallsRunning(false) }
   }, [caseId, queryClient])
 
-  const matches  = matchQuery.data?.matches  ?? []
+  const allMatches = matchQuery.data?.matches ?? []
+  const matches = signalCountFilter === 0
+    ? allMatches
+    : allMatches.filter(m => countPositiveSignals(m.signals) >= signalCountFilter)
   const clusters = clusterQuery.data?.clusters ?? []
   const stalls   = stallQuery.data?.stalls     ?? []
   const entities = entityQuery.data?.entities  ?? []
@@ -1119,15 +1164,26 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         {activeTab === 'matches' && (
-          <div className="flex gap-1 flex-wrap">
-            {GRADE_FILTERS.map(g => (
-              <button key={g} onClick={() => { setGradeFilter(g); setPage(0) }}
-                className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors capitalize
-                  ${gradeFilter === g ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
-                {g === 'all' ? 'All grades' : GRADE_LABEL[g]}
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="flex gap-1 flex-wrap">
+              {GRADE_FILTERS.map(g => (
+                <button key={g} onClick={() => { setGradeFilter(g); setPage(0) }}
+                  className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors capitalize
+                    ${gradeFilter === g ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                  {g === 'all' ? 'All grades' : GRADE_LABEL[g]}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              {[0, 2, 3, 4, 5].map(n => (
+                <button key={n} onClick={() => { setSignalCountFilter(n); setPage(0) }}
+                  className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
+                    ${signalCountFilter === n ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                  {n === 0 ? 'Any signals' : `${n}+ signals`}
+                </button>
+              ))}
+            </div>
+          </>
         )}
         {activeTab === 'clusters' && (
           <div className="flex gap-1 flex-wrap">
