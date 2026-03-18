@@ -219,21 +219,34 @@ function parseAgeRange(s: string | null): [number,number] | null {
 }
 
 function scoreMatch(m: ParsedCase, u: ParsedCase) {
-  // Check for unique physical identifiers BEFORE eliminating on demographics
-  const uniqueId = scoreUniqueId(m, u)
+  // Fast-path eliminations BEFORE expensive unique identifier scoring (~70% of pairs exit here)
 
-  // Chronological impossibility: remains found before person went missing (1-year buffer)
+  // Chronological impossibility — no override possible
   if (m.year && u.year && u.year < m.year - 1) return { eliminated: true, reason: 'chronologically_impossible', composite: 0, grade: 'weak', signals: {} }
 
+  // Quick sex check
   const sa = normSex(m.sex), sb = normSex(u.sex)
-  if (sa && sb && sa !== sb && !uniqueId.overrides) return { eliminated: true, reason: 'sex_mismatch', composite: 0, grade: 'weak', signals: {} }
+  const sexMismatch = !!(sa && sb && sa !== sb)
 
+  // Quick age check
   const ma = parseAgeRange(m.age), ua = parseAgeRange(u.age)
+  let ageIncompatible = false
   if (ma && ua) {
     let adj = ma as [number,number]
     if (m.year && u.year && u.year > m.year) { const e = u.year - m.year; adj = [ma[0]+e, ma[1]+e] }
-    if ((adj[0] > ua[1] + 10 || ua[0] > adj[1] + 10) && !uniqueId.overrides) return { eliminated: true, reason: 'age_incompatible', composite: 0, grade: 'weak', signals: {} }
+    ageIncompatible = adj[0] > ua[1] + 10 || ua[0] > adj[1] + 10
   }
+
+  // Only run expensive unique identifier scoring if needed to override an elimination
+  const uniqueId = (sexMismatch || ageIncompatible)
+    ? scoreUniqueId(m, u)
+    : { overrides: false, score: 0, shared: [] as string[], detail: null as string | null }
+
+  if (sexMismatch && !uniqueId.overrides) return { eliminated: true, reason: 'sex_mismatch', composite: 0, grade: 'weak', signals: {} }
+  if (ageIncompatible && !uniqueId.overrides) return { eliminated: true, reason: 'age_incompatible', composite: 0, grade: 'weak', signals: {} }
+
+  // Pair survived — run full unique identifier scoring if we haven't yet
+  const fullUniqueId = (sexMismatch || ageIncompatible) ? uniqueId : scoreUniqueId(m, u)
 
   // Sex
   const sexScore = !sa || !sb ? 0 : sa === sb ? 15 : 0
@@ -310,7 +323,7 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
     : -20
 
   const rawScore = sexScore + raceScore + ageScore + hair + eyes + heightScore + weight + marks + locationScore + childbirthScore
-  const composite = Math.round(Math.max(0, Math.min(100, ((rawScore + uniqueId.score) / adjustedMax) * 100)))
+  const composite = Math.round(Math.max(0, Math.min(100, ((rawScore + fullUniqueId.score) / adjustedMax) * 100)))
   const grade = composite >= 73 ? 'very_strong' : composite >= 56 ? 'strong' : composite >= 39 ? 'notable' : composite >= 22 ? 'moderate' : 'weak'
 
   const signals: Record<string, unknown> = {
@@ -338,11 +351,11 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
   if (forensicNotes.length) {
     signals.forensic_availability = { note: forensicNotes.join('; ') }
   }
-  if (uniqueId.score > 0) {
+  if (fullUniqueId.score > 0) {
     signals.unique_identifier = {
-      score: uniqueId.score, match: uniqueId.shared.length >= 5 ? 'near_certain' : uniqueId.shared.length >= 3 ? 'strong' : 'possible',
-      keywords: uniqueId.shared, detail: uniqueId.detail,
-      overrode_elimination: uniqueId.overrides && (sa && sb && sa !== sb),
+      score: fullUniqueId.score, match: fullUniqueId.shared.length >= 5 ? 'near_certain' : fullUniqueId.shared.length >= 3 ? 'strong' : 'possible',
+      keywords: fullUniqueId.shared, detail: fullUniqueId.detail,
+      overrode_elimination: fullUniqueId.overrides && (sa && sb && sa !== sb),
     }
   }
 

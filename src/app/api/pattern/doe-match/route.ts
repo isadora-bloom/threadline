@@ -659,39 +659,28 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   eliminated: boolean
   eliminationReason?: string
 } {
-  // Check for unique physical identifiers FIRST — a matching medallion inscription
-  // or specific tattoo/garment can override demographic eliminations. Two people
-  // don't share "silver medallion engraved come holy spirit" or the same rare tattoo.
-  const uniqueId = scoreUniqueIdentifier(missing, unidentified)
-
-  // Chronological impossibility: if remains were found before the person went missing,
-  // this cannot be a match. Allow a 1-year buffer for imprecise date fields.
-  // Unique identifier override does NOT apply here — dates are objective facts.
-  if (
-    missing.year && unidentified.year &&
-    unidentified.year < missing.year - 1
-  ) {
-    return {
-      signals: { sex: { score: 0, match: 'n/a' }, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } },
-      composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'chronologically_impossible',
-    }
+  // Chronological impossibility — dates are objective, no override possible.
+  if (missing.year && unidentified.year && unidentified.year < missing.year - 1) {
+    return { signals: { sex: { score: 0, match: 'n/a' }, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'chronologically_impossible' }
   }
 
+  // Cheap sex + age checks first — scoreUniqueIdentifier only runs on surviving pairs
   const sexSig = scoreSex(missing, unidentified)
-  if (sexSig.score < -100 && !uniqueId.overridesElimination) {
-    return {
-      signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } },
-      composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'sex_mismatch',
+  const ageSig = scoreAge(missing, unidentified)
+
+  if (sexSig.score < -100 || ageSig.score < -5) {
+    // Only worth calling scoreUniqueIdentifier if there's a potential elimination to override
+    const uniqueId = scoreUniqueIdentifier(missing, unidentified)
+    if (sexSig.score < -100 && !uniqueId.overridesElimination) {
+      return { signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'sex_mismatch' }
+    }
+    if (ageSig.score < -5 && !uniqueId.overridesElimination) {
+      return { signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: ageSig, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'age_incompatible' }
     }
   }
 
-  const ageSig = scoreAge(missing, unidentified)
-  if (ageSig.score < -5 && !uniqueId.overridesElimination) {
-    return {
-      signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: ageSig, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } },
-      composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'age_incompatible',
-    }
-  }
+  // Pair survived elimination — full scoring
+  const uniqueId = scoreUniqueIdentifier(missing, unidentified)
 
   const rawSignals: MatchSignals = {
     sex:        sexSig,
