@@ -5,13 +5,13 @@ const isDev = process.env.NODE_ENV === 'development'
 const ContentSecurityPolicy = [
   "default-src 'self'",
   // Supabase
-  `connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.resend.com`,
+  `connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.resend.com https://api.mapbox.com https://events.mapbox.com`,
   // Mapbox
   `script-src 'self' ${isDev ? "'unsafe-eval'" : ''} 'unsafe-inline' https://api.mapbox.com`,
   `worker-src blob:`,
   `child-src blob:`,
   `img-src 'self' data: blob: https://*.supabase.co https://*.mapbox.com`,
-  `style-src 'self' 'unsafe-inline' https://api.mapbox.com https://fonts.googleapis.com`,
+  `style-src 'self' 'unsafe-inline' https://api.mapbox.com https://fonts.googleapis.com https://fonts.gstatic.com`,
   `font-src 'self' https://fonts.gstatic.com`,
   `frame-ancestors 'none'`,
   `form-action 'self'`,
