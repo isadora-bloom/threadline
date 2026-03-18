@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, type ComponentType } from 'react'
+import { useState, useCallback, useMemo, type ComponentType } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -1374,6 +1374,36 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const matches = signalCountFilter === 0
     ? allMatches
     : allMatches.filter(m => countPositiveSignals(m.signals) >= signalCountFilter)
+
+  // Group matches by missing person, sorted by score desc then location score (distance proxy)
+  const groupedMatches = useMemo(() => {
+    type Group = { submissionId: string; name: string | null; doeId: string | null; location: string | null; date: string | null; matches: DoeMatchCandidate[] }
+    const map = new Map<string, Group>()
+    for (const m of matches) {
+      const g = map.get(m.missing_submission_id)
+      if (g) {
+        g.matches.push(m)
+      } else {
+        map.set(m.missing_submission_id, {
+          submissionId: m.missing_submission_id,
+          name: m.missing_name,
+          doeId: m.missing_doe_id,
+          location: m.missing_location,
+          date: m.missing_date,
+          matches: [m],
+        })
+      }
+    }
+    for (const g of map.values()) {
+      g.matches.sort((a, b) => {
+        if (b.composite_score !== a.composite_score) return b.composite_score - a.composite_score
+        const locA = (a.signals.location as { score: number } | undefined)?.score ?? 0
+        const locB = (b.signals.location as { score: number } | undefined)?.score ?? 0
+        return locB - locA
+      })
+    }
+    return [...map.values()].sort((a, b) => (b.matches[0]?.composite_score ?? 0) - (a.matches[0]?.composite_score ?? 0))
+  }, [matches])
   const clusters = clusterQuery.data?.clusters ?? []
   const stalls   = stallQuery.data?.stalls     ?? []
   const entities = entityQuery.data?.entities  ?? []
@@ -1627,9 +1657,37 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {matches.map(m => (
-                <MatchCard key={m.id} match={m} onReview={reviewMatch} />
+            <div className="space-y-5">
+              {groupedMatches.map(group => (
+                <div key={group.submissionId}>
+                  {/* Person header */}
+                  <div className="flex items-center gap-2 mb-2 px-1">
+                    <User className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                    <span className="text-sm font-semibold text-slate-800">{group.name ?? 'Unknown name'}</span>
+                    {group.doeId && (
+                      <span className="text-[10px] text-indigo-400 font-mono">{group.doeId}</span>
+                    )}
+                    {group.location && (
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                        <MapPin className="h-2.5 w-2.5" />{group.location}
+                      </span>
+                    )}
+                    {group.date && (
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                        <Calendar className="h-2.5 w-2.5" />Missing {group.date}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[10px] text-slate-400 flex-shrink-0">
+                      {group.matches.length} match{group.matches.length !== 1 ? 'es' : ''}
+                    </span>
+                  </div>
+                  {/* Match cards indented */}
+                  <div className="space-y-1.5 pl-3 border-l-2 border-slate-100">
+                    {group.matches.map(m => (
+                      <MatchCard key={m.id} match={m} onReview={reviewMatch} />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           )}
