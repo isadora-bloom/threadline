@@ -185,6 +185,20 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
   const statusCfg = STATUS_CONFIG[effectiveStatus] ?? STATUS_CONFIG.queued
   const StatusIcon = statusCfg.icon
 
+  // Normalise findings — guard against corrupted/partial data from old runs
+  const findings = task.findings && typeof task.findings === 'object' && !Array.isArray(task.findings)
+    ? {
+        confirmed:                  Array.isArray(task.findings.confirmed)                  ? task.findings.confirmed                  : [],
+        probable:                   Array.isArray(task.findings.probable)                   ? task.findings.probable                   : [],
+        unresolvable_without_human: Array.isArray(task.findings.unresolvable_without_human) ? task.findings.unresolvable_without_human : [],
+        follow_up_questions:        Array.isArray(task.findings.follow_up_questions)        ? task.findings.follow_up_questions        : [],
+      }
+    : null
+
+  const humanNextSteps = Array.isArray(task.human_next_steps)
+    ? (task.human_next_steps as NextStep[]).filter(s => s && typeof s === 'object' && s.action)
+    : []
+
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div className={`rounded-lg border ${task.status === 'awaiting_review' ? 'border-amber-200 bg-amber-50/30' : 'border-slate-200 bg-white'}`}>
@@ -292,40 +306,40 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
             )}
 
             {/* Findings */}
-            {task.findings && (
+            {findings && (
               <div className="space-y-3">
-                {task.findings.confirmed.length > 0 && (
+                {findings.confirmed.length > 0 && (
                   <div>
                     <p className="text-xs font-semibold text-emerald-700 mb-1.5 flex items-center gap-1">
                       <CheckCircle2 className="h-3 w-3" /> Confirmed findings
                     </p>
                     <ul className="space-y-1">
-                      {task.findings.confirmed.map((f, i) => (
-                        <li key={i} className="text-xs text-slate-700 bg-emerald-50 border border-emerald-100 rounded px-2 py-1.5">{f}</li>
+                      {findings.confirmed.map((f, i) => (
+                        <li key={i} className="text-xs text-slate-700 bg-emerald-50 border border-emerald-100 rounded px-2 py-1.5">{String(f)}</li>
                       ))}
                     </ul>
                   </div>
                 )}
 
-                {task.findings.probable.length > 0 && (
+                {findings.probable.length > 0 && (
                   <div>
                     <p className="text-xs font-semibold text-amber-700 mb-1.5 flex items-center gap-1">
                       <AlertCircle className="h-3 w-3" /> Probable — inference, not confirmed
                     </p>
                     <ul className="space-y-1">
-                      {task.findings.probable.map((f, i) => (
-                        <li key={i} className="text-xs text-slate-700 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 italic">{f}</li>
+                      {findings.probable.map((f, i) => (
+                        <li key={i} className="text-xs text-slate-700 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 italic">{String(f)}</li>
                       ))}
                     </ul>
                   </div>
                 )}
 
-                {task.findings.unresolvable_without_human.length > 0 && (
+                {findings.unresolvable_without_human.length > 0 && (
                   <div>
                     <p className="text-xs font-semibold text-slate-600 mb-1.5">Requires human action to resolve</p>
                     <ul className="space-y-1">
-                      {task.findings.unresolvable_without_human.map((f, i) => (
-                        <li key={i} className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1.5">{f}</li>
+                      {findings.unresolvable_without_human.map((f, i) => (
+                        <li key={i} className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1.5">{String(f)}</li>
                       ))}
                     </ul>
                   </div>
@@ -334,11 +348,11 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
             )}
 
             {/* Human next steps */}
-            {task.human_next_steps && task.human_next_steps.length > 0 && (
+            {humanNextSteps.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-slate-700 mb-2">Recommended next steps</p>
                 <div className="space-y-2">
-                  {task.human_next_steps.map((step, i) => (
+                  {humanNextSteps.map((step, i) => (
                     <div
                       key={i}
                       className={`rounded border p-2.5 ${PRIORITY_COLORS[step.priority] ?? PRIORITY_COLORS.medium}`}
@@ -347,8 +361,8 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                         <ArrowRight className="h-3 w-3 flex-shrink-0 mt-0.5" />
                         <div className="space-y-0.5">
                           <p className="text-xs font-medium">{step.action}</p>
-                          <p className="text-[11px] opacity-80">→ {step.target}</p>
-                          <p className="text-[11px] opacity-70 italic">{step.rationale}</p>
+                          {step.target && <p className="text-[11px] opacity-80">→ {step.target}</p>}
+                          {step.rationale && <p className="text-[11px] opacity-70 italic">{step.rationale}</p>}
                         </div>
                         <span className={`ml-auto text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded
                           ${step.priority === 'high' ? 'bg-red-100 text-red-700' : step.priority === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
@@ -362,13 +376,13 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
             )}
 
             {/* Follow-up questions */}
-            {task.findings?.follow_up_questions && task.findings.follow_up_questions.length > 0 && (
+            {findings?.follow_up_questions && findings.follow_up_questions.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1">
                   <Microscope className="h-3 w-3" /> Follow-up questions surfaced
                 </p>
                 <div className="space-y-1.5">
-                  {task.findings.follow_up_questions.map((q, i) => (
+                  {findings.follow_up_questions.map((q, i) => (
                     <div key={i} className="flex items-start gap-2 bg-indigo-50 border border-indigo-100 rounded px-2.5 py-2">
                       <p className="text-xs text-slate-700 flex-1 leading-snug">{q}</p>
                       {queuedFollowUps.has(i) ? (
