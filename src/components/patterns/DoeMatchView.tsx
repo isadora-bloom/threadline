@@ -1083,6 +1083,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [stallTypeFilter, setStallTypeFilter] = useState<'all' | 'voluntary_misclassification' | 'runaway_no_followup' | 'quick_closure_young'>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
   const [signalCountFilter, setSignalCountFilter] = useState(0)
+  const [marksFilter, setMarksFilter] = useState(false)
 
   const supabase = createClient()
 
@@ -1371,9 +1372,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   }, [])
 
   const allMatches = matchQuery.data?.matches ?? []
-  const matches = signalCountFilter === 0
-    ? allMatches
-    : allMatches.filter(m => countPositiveSignals(m.signals) >= signalCountFilter)
+  const matches = allMatches
+    .filter(m => signalCountFilter === 0 || countPositiveSignals(m.signals) >= signalCountFilter)
+    .filter(m => !marksFilter || ((m.signals.marks as { score: number; match: string } | undefined)?.score ?? 0) > 0)
 
   // Group matches by missing person, sorted by score desc then location score (distance proxy)
   const groupedMatches = useMemo(() => {
@@ -1576,6 +1577,14 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                 </button>
               ))}
             </div>
+            <button
+              onClick={() => { setMarksFilter(v => !v); setPage(0) }}
+              className={`flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border transition-colors
+                ${marksFilter ? 'bg-amber-700 text-white border-amber-700' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+            >
+              <Fingerprint className="h-2.5 w-2.5" />
+              Marks/scars overlap
+            </button>
           </>
         )}
         {activeTab === 'clusters' && (
