@@ -201,8 +201,8 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
 
     try {
       const resp = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001', // Fast mode: Haiku completes in ~15s vs Sonnet's 60-90s
-        max_tokens: 2048,
+        model: 'claude-haiku-4-5-20251001', // Fast mode: Haiku completes in ~20s vs Sonnet's 60-90s
+        max_tokens: 3000,
         tools: [{
           name: 'submit_research_findings',
           description: 'Submit structured research findings for this investigative question',
