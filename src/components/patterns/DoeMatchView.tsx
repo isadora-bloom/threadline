@@ -248,6 +248,29 @@ function MatchCard({ match, onReview }: {
 }) {
   const [open, setOpen] = useState(false)
   const [reviewing, setReviewing] = useState(false)
+  const [fullRecords, setFullRecords] = useState<{ missing: string | null; unidentified: string | null } | null>(null)
+  const [fullRecordsLoading, setFullRecordsLoading] = useState(false)
+  const [showFull, setShowFull] = useState(false)
+
+  const supabase = createClient()
+
+  async function loadFullRecords() {
+    if (fullRecords) { setShowFull(true); return }
+    setFullRecordsLoading(true)
+    try {
+      const [{ data: mRaw }, { data: uRaw }] = await Promise.all([
+        supabase.from('submissions').select('raw_text').eq('id', match.missing_submission_id).single(),
+        supabase.from('submissions').select('raw_text').eq('id', match.unidentified_submission_id).single(),
+      ])
+      setFullRecords({
+        missing:      (mRaw as { raw_text: string } | null)?.raw_text ?? null,
+        unidentified: (uRaw as { raw_text: string } | null)?.raw_text ?? null,
+      })
+      setShowFull(true)
+    } finally {
+      setFullRecordsLoading(false)
+    }
+  }
 
   async function review(status: string) {
     setReviewing(true)
@@ -470,6 +493,49 @@ function MatchCard({ match, onReview }: {
                 Reset to unreviewed
               </Button>
             )}
+
+            {/* Full record viewer */}
+            <div className="pt-1 border-t border-slate-100">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 text-[11px] text-slate-400 gap-1 px-0"
+                disabled={fullRecordsLoading}
+                onClick={() => showFull ? setShowFull(false) : loadFullRecords()}
+              >
+                {fullRecordsLoading
+                  ? <><Loader2 className="h-3 w-3 animate-spin" />Loading full records…</>
+                  : showFull
+                  ? <><ChevronUp className="h-3 w-3" />Hide full records</>
+                  : <><ChevronDown className="h-3 w-3" />View full records</>
+                }
+              </Button>
+
+              {showFull && fullRecords && (
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  {fullRecords.missing && (
+                    <div>
+                      <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                        Missing person — full record
+                      </p>
+                      <pre className="text-[10px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-mono">
+                        {fullRecords.missing}
+                      </pre>
+                    </div>
+                  )}
+                  {fullRecords.unidentified && (
+                    <div>
+                      <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                        Unidentified — full record
+                      </p>
+                      <pre className="text-[10px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-mono">
+                        {fullRecords.unidentified}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </CollapsibleContent>
       </Card>

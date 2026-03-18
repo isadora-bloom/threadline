@@ -637,6 +637,19 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   // don't share "silver medallion engraved come holy spirit" or the same rare tattoo.
   const uniqueId = scoreUniqueIdentifier(missing, unidentified)
 
+  // Chronological impossibility: if remains were found before the person went missing,
+  // this cannot be a match. Allow a 1-year buffer for imprecise date fields.
+  // Unique identifier override does NOT apply here — dates are objective facts.
+  if (
+    missing.year && unidentified.year &&
+    unidentified.year < missing.year - 1
+  ) {
+    return {
+      signals: { sex: { score: 0, match: 'n/a' }, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' } },
+      composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'chronologically_impossible',
+    }
+  }
+
   const sexSig = scoreSex(missing, unidentified)
   if (sexSig.score < -100 && !uniqueId.overridesElimination) {
     return {

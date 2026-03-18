@@ -218,6 +218,9 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
   // Check for unique physical identifiers BEFORE eliminating on demographics
   const uniqueId = scoreUniqueId(m, u)
 
+  // Chronological impossibility: remains found before person went missing (1-year buffer)
+  if (m.year && u.year && u.year < m.year - 1) return { eliminated: true, reason: 'chronologically_impossible', composite: 0, grade: 'weak', signals: {} }
+
   const sa = normSex(m.sex), sb = normSex(u.sex)
   if (sa && sb && sa !== sb && !uniqueId.overrides) return { eliminated: true, reason: 'sex_mismatch', composite: 0, grade: 'weak', signals: {} }
 
