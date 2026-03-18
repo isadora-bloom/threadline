@@ -203,7 +203,7 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
     try {
       const resp = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
+        max_tokens: 4096,
         tools: [{
           name: 'submit_research_findings',
           description: 'Submit structured research findings for this investigative question',
@@ -463,7 +463,7 @@ Return JSON only (no preamble, no markdown):
   try {
     const synthResp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
+      max_tokens: 4096,
       tools: [{
         name: 'submit_synthesis',
         description: 'Submit the final synthesized research report',

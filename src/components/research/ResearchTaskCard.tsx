@@ -208,15 +208,16 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
                   <span className="text-[11px] text-blue-500 tabular-nums">
                     {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
                   </span>
-                  {elapsed > 120 && canRun && (
+                  {elapsed > 45 && canRun && (
                     <Button
                       size="sm"
-                      variant="ghost"
-                      className="h-6 text-[11px] text-slate-400 hover:text-red-600"
+                      variant="outline"
+                      className="h-6 text-[11px] border-red-200 text-red-600 hover:bg-red-50"
                       onClick={e => { e.stopPropagation(); resetMutation.mutate() }}
                       disabled={resetMutation.isPending}
                     >
-                      Reset
+                      {resetMutation.isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : null}
+                      Stuck? Reset
                     </Button>
                   )}
                 </div>
@@ -256,18 +257,18 @@ export function ResearchTaskCard({ task, canRun }: ResearchTaskCardProps) {
 
             {/* Running status */}
             {task.status === 'running' && (
-              <div className={`flex items-start gap-2 rounded-lg p-3 ${elapsed > 120 ? 'bg-amber-50 border border-amber-200' : 'bg-blue-50 border border-blue-100'}`}>
-                <Loader2 className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 animate-spin ${elapsed > 120 ? 'text-amber-500' : 'text-blue-400'}`} />
+              <div className={`flex items-start gap-2 rounded-lg p-3 ${elapsed > 45 ? 'bg-amber-50 border border-amber-200' : 'bg-blue-50 border border-blue-100'}`}>
+                <Loader2 className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 animate-spin ${elapsed > 45 ? 'text-amber-500' : 'text-blue-400'}`} />
                 <div className="space-y-1">
-                  <p className={`text-xs font-medium ${elapsed > 120 ? 'text-amber-800' : 'text-blue-700'}`}>
-                    {elapsed > 120 ? 'Taking longer than expected' : 'Research in progress'}
+                  <p className={`text-xs font-medium ${elapsed > 45 ? 'text-amber-800' : 'text-blue-700'}`}>
+                    {elapsed > 45 ? 'Taking longer than expected' : 'Research in progress'}
                   </p>
-                  <p className={`text-[11px] ${elapsed > 120 ? 'text-amber-600' : 'text-blue-500'}`}>
-                    {elapsed > 120
-                      ? `Running for ${Math.floor(elapsed / 60)}m ${elapsed % 60}s. This may be a deep search with many rabbit holes, or it may be stuck. You can reset it to queued and re-run.`
-                      : 'Searching sources and following leads. Fast run typically completes in under 10s; deep mode can take up to 2 minutes.'}
+                  <p className={`text-[11px] ${elapsed > 45 ? 'text-amber-600' : 'text-blue-500'}`}>
+                    {elapsed > 45
+                      ? `Running for ${elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}. If it doesn't complete soon, reset and re-run.`
+                      : 'Searching and synthesising. Fast run completes in 20–40s.'}
                   </p>
-                  {elapsed > 120 && canRun && (
+                  {elapsed > 45 && canRun && (
                     <Button
                       size="sm"
                       variant="outline"
