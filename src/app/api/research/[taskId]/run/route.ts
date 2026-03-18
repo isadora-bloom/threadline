@@ -191,6 +191,7 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
     const sourcesConsulted = [{ name: 'Case records + AI training knowledge', url: null, type: 'training_knowledge', relevance: task.question }]
 
     try {
+      console.log('[research/run] Starting fast mode for task:', taskId, 'question:', task.question.slice(0, 80))
       const resp = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
@@ -240,8 +241,11 @@ INSTRUCTIONS:
 5. Never fabricate sources. Flag uncertainty where it exists.`,
         }],
       })
+      console.log('[research/run] Anthropic response stop_reason:', resp.stop_reason, 'content blocks:', resp.content.length, 'types:', resp.content.map(b => b.type).join(','))
       const toolUse = resp.content.find(b => b.type === 'tool_use')
+      console.log('[research/run] Tool use block found:', !!toolUse)
       if (toolUse?.type === 'tool_use') {
+        console.log('[research/run] Tool input keys:', Object.keys(toolUse.input as object))
         const input = toolUse.input as {
           confirmed: string[]
           probable: string[]
@@ -260,9 +264,10 @@ INSTRUCTIONS:
         confidenceSummary = input.confidence_summary ?? ''
       }
     } catch (err) {
-      console.error('Fast research error:', err)
+      console.error('[research/run] Fast research error:', err)
       confidenceSummary = 'Research failed. Try again or use Dig Deeper.'
     }
+    console.log('[research/run] Saving fast mode result. findings:', !!findings, 'confidenceSummary length:', confidenceSummary.length)
 
     const { data: updated, error: updateErr } = await supabase
       .from('research_tasks')
