@@ -65,12 +65,29 @@ interface DoeCluster {
   primary_signal: string | null
   signal_category: string | null
   matched_signals: string[] | null
+  submission_ids: string[] | null
   signals: Record<string, unknown>
   ai_narrative: string | null
   ai_generated_at: string | null
   reviewer_status: string
   reviewer_note: string | null
   generated_at: string
+}
+
+interface DoeClusterMember {
+  id: string
+  cluster_id: string
+  submission_id: string
+  confidence: number
+  confidence_reason: string | null
+  membership_status: 'candidate' | 'confirmed' | 'rejected'
+  member_name: string | null
+  member_doe_id: string | null
+  member_location: string | null
+  member_date: string | null
+  member_age: string | null
+  member_sex: string | null
+  notes: string | null
 }
 
 interface DoeEntityMention {
@@ -460,42 +477,160 @@ function MatchCard({ match, onReview }: {
   )
 }
 
-function ClusterCard({ cluster, onReview, onSynthesize }: {
+const CLUSTER_TYPE_META: Record<string, { label: string; borderColor: string; iconBg: string; iconColor: string }> = {
+  circumstance_signal:      { label: 'Circumstance',    borderColor: 'border-l-rose-400',    iconBg: 'bg-rose-100',    iconColor: 'text-rose-600' },
+  demographic_temporal:     { label: 'Demographic',     borderColor: 'border-l-indigo-400',  iconBg: 'bg-indigo-100',  iconColor: 'text-indigo-600' },
+  same_date_proximity:      { label: 'Same date',       borderColor: 'border-l-amber-400',   iconBg: 'bg-amber-100',   iconColor: 'text-amber-600' },
+  location_runaway_cluster: { label: 'Location runaway', borderColor: 'border-l-orange-400', iconBg: 'bg-orange-100',  iconColor: 'text-orange-600' },
+  corridor_cluster:         { label: 'Corridor',        borderColor: 'border-l-cyan-400',    iconBg: 'bg-cyan-100',    iconColor: 'text-cyan-600' },
+  age_bracket:              { label: 'Age bracket',     borderColor: 'border-l-purple-400',  iconBg: 'bg-purple-100',  iconColor: 'text-purple-600' },
+}
+
+const MEMBER_STATUS_STYLE: Record<string, string> = {
+  candidate: 'bg-slate-100 text-slate-600',
+  confirmed: 'bg-green-100 text-green-700',
+  rejected:  'bg-red-50 text-red-500',
+}
+
+function ClusterMemberRow({ member, onReviewMember }: {
+  member: DoeClusterMember
+  onReviewMember: (id: string, status: 'confirmed' | 'rejected' | 'candidate') => void
+}) {
+  const pct = Math.round(member.confidence * 100)
+  const isRejected = member.membership_status === 'rejected'
+
+  return (
+    <div className={`flex items-start gap-2 p-2 rounded border border-slate-100 text-[10px] transition-opacity ${isRejected ? 'opacity-40' : ''}`}>
+      {/* Confidence */}
+      <div className="flex-shrink-0 text-center w-8">
+        <div className={`text-sm font-black ${pct >= 85 ? 'text-emerald-700' : pct >= 75 ? 'text-amber-600' : 'text-slate-500'}`}>{pct}%</div>
+      </div>
+
+      {/* Member info */}
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-slate-800 truncate">{member.member_name ?? 'Unknown'}</div>
+        <div className="text-slate-500 flex flex-wrap gap-x-2 mt-0.5">
+          {member.member_sex && <span>{member.member_sex}</span>}
+          {member.member_age && <span>age {member.member_age}</span>}
+          {member.member_location && <span className="flex items-center gap-0.5"><MapPin className="h-2 w-2" />{member.member_location}</span>}
+          {member.member_date && <span><Calendar className="h-2 w-2 inline mr-0.5" />{member.member_date}</span>}
+          {member.member_doe_id && <span className="text-indigo-400 font-mono">{member.member_doe_id}</span>}
+        </div>
+        {member.confidence_reason && (
+          <div className="text-slate-400 italic mt-0.5 truncate">{member.confidence_reason}</div>
+        )}
+      </div>
+
+      {/* Status + actions */}
+      <div className="flex-shrink-0 flex flex-col items-end gap-1">
+        <Badge className={`text-[9px] px-1 py-0 ${MEMBER_STATUS_STYLE[member.membership_status]}`}>
+          {member.membership_status}
+        </Badge>
+        {member.membership_status !== 'rejected' && (
+          <button
+            onClick={() => onReviewMember(member.id, 'confirmed')}
+            className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${member.membership_status === 'confirmed' ? 'bg-green-200 text-green-800' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
+          >
+            <CheckCircle className="h-2.5 w-2.5 inline mr-0.5" />Confirm
+          </button>
+        )}
+        {member.membership_status !== 'confirmed' && (
+          <button
+            onClick={() => onReviewMember(member.id, member.membership_status === 'rejected' ? 'candidate' : 'rejected')}
+            className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${member.membership_status === 'rejected' ? 'bg-slate-200 text-slate-500 hover:bg-slate-300' : 'bg-red-50 text-red-500 hover:bg-red-100'}`}
+          >
+            {member.membership_status === 'rejected'
+              ? <><RefreshCw className="h-2.5 w-2.5 inline mr-0.5" />Restore</>
+              : <><XCircle className="h-2.5 w-2.5 inline mr-0.5" />Reject</>
+            }
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewMember }: {
   cluster: DoeCluster
+  missingCaseId: string
   onReview: (id: string, status: string) => void
   onSynthesize: (id: string) => void
+  onReviewMember: (id: string, status: 'confirmed' | 'rejected' | 'candidate') => void
 }) {
   const [open, setOpen] = useState(false)
+  const [members, setMembers] = useState<DoeClusterMember[] | null>(null)
+  const [membersLoading, setMembersLoading] = useState(false)
+
   const isCircumstance = cluster.cluster_type === 'circumstance_signal'
-  const signals = cluster.signals as {
-    season_counts?: Record<string, number>
-    temporal_count?: number
-    primary_label?: string
-    top_co_signals?: string[]
-    co_signals?: Record<string, number>
+
+  // Load members when expanded (only for new cluster types that have member rows)
+  const hasMembers = ['location_runaway_cluster', 'corridor_cluster', 'age_bracket'].includes(cluster.cluster_type)
+
+  async function loadMembers() {
+    if (!hasMembers || members !== null) return
+    setMembersLoading(true)
+    try {
+      const res = await fetch(`/api/pattern/doe-match?missingCaseId=${missingCaseId}&type=cluster_members&clusterId=${cluster.id}`)
+      const data = await res.json()
+      setMembers(data.members ?? [])
+    } catch {
+      setMembers([])
+    } finally {
+      setMembersLoading(false)
+    }
   }
 
+  function handleOpenChange(val: boolean) {
+    setOpen(val)
+    if (val && hasMembers) loadMembers()
+  }
+
+  function handleMemberReview(memberId: string, status: 'confirmed' | 'rejected' | 'candidate') {
+    // Optimistic update
+    setMembers(prev => prev?.map(m => m.id === memberId ? { ...m, membership_status: status } : m) ?? null)
+    onReviewMember(memberId, status)
+  }
   const ageGroupLabel: Record<string, string> = {
     child: 'children (0–12)', teen: 'teens (13–17)', young_adult: 'young adults (18–25)',
     adult: 'adults (26–40)', middle_age: 'middle age (41–60)', senior: 'seniors (60+)',
   }
 
-  const borderColor = isCircumstance ? 'border-l-rose-400' : 'border-l-indigo-400'
-  const iconBg      = isCircumstance ? 'bg-rose-100' : 'bg-indigo-100'
-  const iconColor   = isCircumstance ? 'text-rose-600' : 'text-indigo-600'
+  const meta = CLUSTER_TYPE_META[cluster.cluster_type] ?? CLUSTER_TYPE_META.demographic_temporal
+  const { borderColor, iconBg, iconColor } = meta
   const categoryStyle = cluster.signal_category
     ? (SIGNAL_CATEGORY_STYLE[cluster.signal_category] ?? 'bg-slate-100 text-slate-600')
     : 'bg-indigo-50 text-indigo-700'
 
+  const clusterSig = cluster.signals as {
+    season_counts?: Record<string, number>
+    temporal_count?: number
+    primary_label?: string
+    top_co_signals?: string[]
+    co_signals?: Record<string, number>
+    city?: string
+    sex_counts?: Record<string, number>
+    corridor_label?: string
+    state_counts?: Record<string, number>
+    mean_age?: number
+    std_dev?: number
+    pattern?: string
+  }
+
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={handleOpenChange}>
       <Card className={`overflow-hidden border-l-4 ${borderColor}`}>
         <CollapsibleTrigger asChild>
           <button className="w-full text-left">
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
                 <div className={`flex-shrink-0 ${iconBg} rounded-full p-2`}>
-                  {isCircumstance
+                  {cluster.cluster_type === 'corridor_cluster'
+                    ? <Car className={`h-4 w-4 ${iconColor}`} />
+                    : cluster.cluster_type === 'age_bracket'
+                    ? <Scale className={`h-4 w-4 ${iconColor}`} />
+                    : cluster.cluster_type === 'location_runaway_cluster'
+                    ? <MapPin className={`h-4 w-4 ${iconColor}`} />
+                    : isCircumstance
                     ? <Brain className={`h-4 w-4 ${iconColor}`} />
                     : <Users className={`h-4 w-4 ${iconColor}`} />
                   }
@@ -503,18 +638,34 @@ function ClusterCard({ cluster, onReview, onSynthesize }: {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-bold text-slate-900">{cluster.case_count} cases</span>
+                    <Badge className="text-[9px] bg-slate-100 text-slate-500">{meta.label}</Badge>
 
                     {isCircumstance && cluster.primary_signal && (
                       <Badge className={`text-[10px] border ${categoryStyle}`}>
-                        {signals.primary_label ?? cluster.primary_signal.replace(/_/g, ' ')}
+                        {clusterSig.primary_label ?? cluster.primary_signal.replace(/_/g, ' ')}
                       </Badge>
                     )}
-                    {!isCircumstance && cluster.race && (
+                    {cluster.cluster_type === 'demographic_temporal' && cluster.race && (
                       <Badge className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200">{cluster.race}</Badge>
                     )}
-                    {!isCircumstance && cluster.sex && cluster.age_group && (
+                    {cluster.cluster_type === 'demographic_temporal' && cluster.sex && cluster.age_group && (
                       <Badge className="text-[10px] bg-slate-100 text-slate-600">
                         {cluster.sex} {ageGroupLabel[cluster.age_group] ?? cluster.age_group}
+                      </Badge>
+                    )}
+                    {cluster.cluster_type === 'location_runaway_cluster' && clusterSig.city && (
+                      <Badge className="text-[10px] bg-orange-50 text-orange-700 border-orange-200">
+                        <MapPin className="h-2.5 w-2.5 mr-0.5" />{clusterSig.city}
+                      </Badge>
+                    )}
+                    {cluster.cluster_type === 'corridor_cluster' && clusterSig.corridor_label && (
+                      <Badge className="text-[10px] bg-cyan-50 text-cyan-700 border-cyan-200">
+                        <Car className="h-2.5 w-2.5 mr-0.5" />{clusterSig.corridor_label}
+                      </Badge>
+                    )}
+                    {cluster.cluster_type === 'age_bracket' && clusterSig.std_dev !== undefined && (
+                      <Badge className="text-[10px] bg-purple-50 text-purple-700 border-purple-200">
+                        SD {clusterSig.std_dev}yr
                       </Badge>
                     )}
                     {cluster.state && (
@@ -525,6 +676,11 @@ function ClusterCard({ cluster, onReview, onSynthesize }: {
                     {cluster.temporal_pattern && (
                       <Badge className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
                         <Calendar className="h-2.5 w-2.5 mr-0.5" />{cluster.temporal_pattern} pattern
+                      </Badge>
+                    )}
+                    {hasMembers && (
+                      <Badge className="text-[9px] bg-slate-50 text-slate-400 border-slate-200">
+                        members tracked
                       </Badge>
                     )}
                     {cluster.ai_narrative && (
@@ -554,11 +710,11 @@ function ClusterCard({ cluster, onReview, onSynthesize }: {
         <CollapsibleContent>
           <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
             {/* Co-occurring signals (circumstance clusters) */}
-            {isCircumstance && signals.co_signals && Object.keys(signals.co_signals).length > 0 && (
+            {isCircumstance && clusterSig.co_signals && Object.keys(clusterSig.co_signals).length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Also present in these cases</p>
                 <div className="flex flex-wrap gap-1">
-                  {Object.entries(signals.co_signals)
+                  {Object.entries(clusterSig.co_signals)
                     .sort(([, a], [, b]) => (b as number) - (a as number))
                     .slice(0, 8)
                     .map(([sig, count]) => (
@@ -571,17 +727,96 @@ function ClusterCard({ cluster, onReview, onSynthesize }: {
             )}
 
             {/* Seasonal distribution (demographic clusters) */}
-            {!isCircumstance && signals.season_counts && Object.keys(signals.season_counts).length > 0 && (
+            {cluster.cluster_type === 'demographic_temporal' && clusterSig.season_counts && Object.keys(clusterSig.season_counts).length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Seasonal distribution</p>
                 <div className="flex gap-3">
-                  {Object.entries(signals.season_counts).map(([season, count]) => (
+                  {Object.entries(clusterSig.season_counts).map(([season, count]) => (
                     <div key={season} className="text-center">
                       <div className="text-lg font-bold text-slate-700">{count as number}</div>
                       <div className="text-[10px] text-slate-400 capitalize">{season}</div>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Sex breakdown (runaway/corridor/age_bracket clusters) */}
+            {clusterSig.sex_counts && Object.keys(clusterSig.sex_counts).length > 0 && !isCircumstance && cluster.cluster_type !== 'demographic_temporal' && (
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Sex breakdown</p>
+                <div className="flex gap-3">
+                  {Object.entries(clusterSig.sex_counts).map(([sx, count]) => (
+                    <div key={sx} className="text-center">
+                      <div className="text-lg font-bold text-slate-700">{count as number}</div>
+                      <div className="text-[10px] text-slate-400 capitalize">{sx}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* State breakdown (corridor clusters) */}
+            {cluster.cluster_type === 'corridor_cluster' && clusterSig.state_counts && Object.keys(clusterSig.state_counts).length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">State distribution</p>
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(clusterSig.state_counts)
+                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                    .map(([st, count]) => (
+                      <span key={st} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
+                        {st} ({count as number})
+                      </span>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* Age bracket stats */}
+            {cluster.cluster_type === 'age_bracket' && clusterSig.mean_age !== undefined && (
+              <div className="flex items-center gap-4 p-2 bg-purple-50 border border-purple-100 rounded text-[10px]">
+                <div className="text-center">
+                  <div className="text-base font-black text-purple-700">{clusterSig.mean_age}</div>
+                  <div className="text-purple-400">mean age</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-base font-black text-purple-700">±{clusterSig.std_dev}</div>
+                  <div className="text-purple-400">std dev (yr)</div>
+                </div>
+                <div className="text-purple-600 italic">
+                  Tight age preference over {cluster.year_span_start && cluster.year_span_end
+                    ? `${cluster.year_span_end - cluster.year_span_start} years`
+                    : 'multiple years'}
+                  . Warrants investigative attention.
+                </div>
+              </div>
+            )}
+
+            {/* Member list — for location_runaway_cluster, corridor_cluster, age_bracket */}
+            {hasMembers && (
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                  Individual cases in this pattern
+                  {members && (
+                    <span className="ml-2 text-slate-300 normal-case font-normal">
+                      {members.filter(m => m.membership_status === 'confirmed').length} confirmed,
+                      {' '}{members.filter(m => m.membership_status === 'candidate').length} pending
+                    </span>
+                  )}
+                </p>
+                {membersLoading && (
+                  <div className="py-3 text-center"><Loader2 className="h-4 w-4 animate-spin text-slate-300 mx-auto" /></div>
+                )}
+                {!membersLoading && members !== null && members.length === 0 && (
+                  <p className="text-[10px] text-slate-400 italic">No member records yet — re-run the cluster detection to populate.</p>
+                )}
+                {!membersLoading && members && members.length > 0 && (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                    {members.map(m => (
+                      <ClusterMemberRow key={m.id} member={m} onReviewMember={handleMemberReview} />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -771,11 +1006,14 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [clusterRunning, setClusterRunning] = useState(false)
   const [circumstanceRunning, setCircumstanceRunning] = useState(false)
   const [sameDateRunning, setSameDateRunning] = useState(false)
+  const [locationRunawayRunning, setLocationRunawayRunning] = useState(false)
+  const [corridorRunning, setCorridorRunning] = useState(false)
+  const [ageBracketRunning, setAgeBracketRunning] = useState(false)
   const [entitiesRunning, setEntitiesRunning] = useState(false)
   const [dedupRunning, setDedupRunning] = useState(false)
   const [stallsRunning, setStallsRunning] = useState(false)
   const [confirmRunning, setConfirmRunning] = useState(false)
-  const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity'>('all')
+  const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity' | 'location_runaway_cluster' | 'corridor_cluster' | 'age_bracket'>('all')
   const [stallTypeFilter, setStallTypeFilter] = useState<'all' | 'voluntary_misclassification' | 'runaway_no_followup' | 'quick_closure_young'>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
   const [signalCountFilter, setSignalCountFilter] = useState(0)
@@ -1022,6 +1260,50 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     } finally { setStallsRunning(false) }
   }, [caseId, queryClient])
 
+  const runLocationRunaway = useCallback(async () => {
+    setLocationRunawayRunning(true)
+    try {
+      await fetch('/api/pattern/doe-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'location_runaway_cluster', missingCaseId: caseId }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+    } finally { setLocationRunawayRunning(false) }
+  }, [caseId, queryClient])
+
+  const runCorridor = useCallback(async () => {
+    setCorridorRunning(true)
+    try {
+      await fetch('/api/pattern/doe-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'corridor_cluster', missingCaseId: caseId }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+    } finally { setCorridorRunning(false) }
+  }, [caseId, queryClient])
+
+  const runAgeBracket = useCallback(async () => {
+    setAgeBracketRunning(true)
+    try {
+      await fetch('/api/pattern/doe-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'age_bracket_cluster', missingCaseId: caseId }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', caseId] })
+    } finally { setAgeBracketRunning(false) }
+  }, [caseId, queryClient])
+
+  const reviewClusterMember = useCallback(async (id: string, membershipStatus: 'confirmed' | 'rejected' | 'candidate') => {
+    await fetch('/api/pattern/doe-match', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, type: 'cluster_member', membershipStatus }),
+    })
+  }, [])
+
   const allMatches = matchQuery.data?.matches ?? []
   const matches = signalCountFilter === 0
     ? allMatches
@@ -1081,6 +1363,21 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               disabled={sameDateRunning} onClick={runSameDateCluster}>
               {sameDateRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Calendar className="h-3 w-3" />}
               {sameDateRunning ? 'Clustering…' : 'Date clusters'}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-orange-200 text-orange-700 hover:bg-orange-50"
+              disabled={locationRunawayRunning} onClick={runLocationRunaway}>
+              {locationRunawayRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
+              {locationRunawayRunning ? 'Scanning…' : 'Location runaway'}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-cyan-200 text-cyan-700 hover:bg-cyan-50"
+              disabled={corridorRunning} onClick={runCorridor}>
+              {corridorRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Car className="h-3 w-3" />}
+              {corridorRunning ? 'Scanning…' : 'Corridors'}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-purple-200 text-purple-700 hover:bg-purple-50"
+              disabled={ageBracketRunning} onClick={runAgeBracket}>
+              {ageBracketRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scale className="h-3 w-3" />}
+              {ageBracketRunning ? 'Scanning…' : 'Age bracket'}
             </Button>
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
               disabled={entitiesRunning} onClick={runExtractEntities}>
@@ -1188,10 +1485,13 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         {activeTab === 'clusters' && (
           <div className="flex gap-1 flex-wrap">
             {([
-              { value: 'all',                  label: 'All' },
-              { value: 'demographic_temporal', label: 'Demographic' },
-              { value: 'circumstance_signal',  label: 'Circumstance' },
-              { value: 'same_date_proximity',  label: 'Same date' },
+              { value: 'all',                      label: 'All' },
+              { value: 'demographic_temporal',     label: 'Demographic' },
+              { value: 'circumstance_signal',      label: 'Circumstance' },
+              { value: 'same_date_proximity',      label: 'Same date' },
+              { value: 'location_runaway_cluster', label: 'Location runaway' },
+              { value: 'corridor_cluster',         label: 'Corridor' },
+              { value: 'age_bracket',              label: 'Age bracket' },
             ] as const).map(f => (
               <button key={f.value} onClick={() => { setClusterTypeFilter(f.value); setPage(0) }}
                 className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
@@ -1306,7 +1606,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
           ) : (
             <div className="space-y-2">
               {clusters.map(c => (
-                <ClusterCard key={c.id} cluster={c} onReview={reviewCluster} onSynthesize={synthesizeCluster} />
+                <ClusterCard key={c.id} cluster={c} missingCaseId={caseId} onReview={reviewCluster} onSynthesize={synthesizeCluster} onReviewMember={reviewClusterMember} />
               ))}
             </div>
           )}

@@ -11,9 +11,12 @@
  *   extract_entities        — extract person names and vehicle descriptions from circumstances text
  *   name_dedup              — phonetic (Jaro-Winkler) comparison to find likely duplicate records
  *   detect_stalls           — flag voluntary/runaway classifications with years elapsed, no resolution
+ *   location_runaway_cluster — 3+ runaway/voluntary cases from same city within a 5-year window
+ *   corridor_cluster        — cases whose circumstances mention a major US highway corridor
+ *   age_bracket_cluster     — 4+ cases in same sex+state with age SD ≤ 3.5yr spanning 5+ years
  *
- * GET  — fetch candidates, clusters, stalls, or entities
- * PATCH — review a candidate, cluster, or stall flag
+ * GET  — fetch candidates, clusters, stalls, entities, or cluster_members
+ * PATCH — review a candidate, cluster, stall flag, or cluster_member
  *
  * ALL results require investigator review. Scores are signals, not conclusions.
  */
@@ -213,6 +216,38 @@ function parseSubmission(sub: RawSubmission): ParsedCase {
     stateOfRemains: parseLine(r, 'State of Remains'),
   }
 }
+
+// ─── Pattern detection helpers ────────────────────────────────────────────────
+
+function extractCity(location: string | null): string | null {
+  if (!location) return null
+  const city = location.split(',')[0].trim()
+  return city.length > 2 ? city.toLowerCase().replace(/[^a-z\s]/g, '').trim() : null
+}
+
+function calcStdDev(nums: number[]): number {
+  if (nums.length < 2) return 0
+  const mean = nums.reduce((a, b) => a + b, 0) / nums.length
+  const variance = nums.reduce((sum, n) => sum + Math.pow(n - mean, 2), 0) / nums.length
+  return Math.sqrt(variance)
+}
+
+// Major US transport corridors — patterns matched against circumstances + location text
+const CORRIDORS: Array<{ id: string; label: string; patterns: RegExp[] }> = [
+  { id: 'I-10',  label: 'I-10 (Gulf Coast/Southwest)',   patterns: [/\bI-?10\b/i, /interstate\s*10\b/i] },
+  { id: 'I-20',  label: 'I-20 (Deep South)',             patterns: [/\bI-?20\b/i, /interstate\s*20\b/i] },
+  { id: 'I-35',  label: 'I-35 (Central)',                patterns: [/\bI-?35\b/i, /interstate\s*35\b/i] },
+  { id: 'I-40',  label: 'I-40 (Mid-South Crossroads)',   patterns: [/\bI-?40\b/i, /interstate\s*40\b/i] },
+  { id: 'I-55',  label: 'I-55 (Mississippi Corridor)',   patterns: [/\bI-?55\b/i, /interstate\s*55\b/i] },
+  { id: 'I-75',  label: 'I-75 (Southeast)',              patterns: [/\bI-?75\b/i, /interstate\s*75\b/i] },
+  { id: 'I-80',  label: 'I-80 (Northern Transcontinental)', patterns: [/\bI-?80\b/i, /interstate\s*80\b/i] },
+  { id: 'I-90',  label: 'I-90 (Northern)',               patterns: [/\bI-?90\b/i, /interstate\s*90\b/i] },
+  { id: 'I-95',  label: 'I-95 (East Coast)',             patterns: [/\bI-?95\b/i, /interstate\s*95\b/i] },
+  { id: 'US-1',  label: 'US-1 (East Coast Highway)',     patterns: [/\bUS-?1\b/i, /route\s*1\b/i] },
+  { id: 'US-101', label: 'US-101 (Pacific Coast)',       patterns: [/\bUS-?101\b/i, /route\s*101\b/i, /pacific\s*coast\s*hwy/i] },
+  { id: 'I-25',  label: 'I-25 (Rocky Mountain)',         patterns: [/\bI-?25\b/i, /interstate\s*25\b/i] },
+  { id: 'I-65',  label: 'I-65 (Central South)',          patterns: [/\bI-?65\b/i, /interstate\s*65\b/i] },
+]
 
 // ─── Body state decomposition weighting ──────────────────────────────────────
 //
@@ -1493,6 +1528,330 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // ── LOCATION RUNAWAY CLUSTER ──────────────────────────────────────────────────
+  // 3+ runaway/voluntary classified cases from the same city within any 5-year window
+  if (action === 'location_runaway_cluster') {
+    const { data: allRaw } = await supabase
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+    const parsed = (allRaw ?? []).map(parseSubmission)
+
+    // Only runaway/voluntary-flagged cases with a location + year
+    const runaways = parsed.filter(p => {
+      const lower = (p.circumstances ?? '').toLowerCase()
+      return (lower.includes('runaway') || lower.includes('voluntary')) && p.year && p.location
+    })
+
+    // Group by normalised city + state
+    const cityBuckets = new Map<string, ParsedCase[]>()
+    for (const p of runaways) {
+      const city = extractCity(p.location)
+      if (!city || !p.state) continue
+      const key = `${city}|${p.state}`
+      if (!cityBuckets.has(key)) cityBuckets.set(key, [])
+      cityBuckets.get(key)!.push(p)
+    }
+
+    await supabase.from('doe_victimology_clusters' as never)
+      .delete().eq('case_id', missingCaseId).eq('cluster_type', 'location_runaway_cluster')
+
+    const toInsert: object[] = []
+    const memberRows: object[] = []
+
+    for (const [key, subs] of cityBuckets) {
+      if (subs.length < 3) continue
+      const [city, state] = key.split('|')
+
+      // Find the largest cluster within any 5-year window
+      const years = subs.map(s => s.year).filter(Boolean) as number[]
+      let bestWindow: ParsedCase[] = []
+      for (const startYear of years) {
+        const win = subs.filter(s => s.year && s.year >= startYear && s.year < startYear + 5)
+        if (win.length > bestWindow.length) bestWindow = win
+      }
+      if (bestWindow.length < 3) continue
+
+      const winYears  = bestWindow.map(s => s.year).filter(Boolean) as number[]
+      const winMin    = Math.min(...winYears)
+      const winMax    = Math.max(...winYears)
+      const cityLabel = city.replace(/\b\w/g, c => c.toUpperCase())
+      const sexCounts = bestWindow.reduce((acc, s) => {
+        const sx = normSex(s.sex) ?? 'unknown'
+        acc[sx] = (acc[sx] ?? 0) + 1
+        return acc
+      }, {} as Record<string, number>)
+
+      const confidence  = Math.min(0.95, 0.65 + bestWindow.length * 0.05)
+      const clusterId   = crypto.randomUUID()
+      const yearRange   = winMin === winMax ? String(winMin) : `${winMin}–${winMax}`
+
+      toInsert.push({
+        id: clusterId,
+        case_id: missingCaseId,
+        cluster_label: `${bestWindow.length} runaway/voluntary cases — ${cityLabel}, ${state} (${yearRange})`,
+        cluster_type: 'location_runaway_cluster',
+        state,
+        case_count: bestWindow.length,
+        year_span_start: winMin,
+        year_span_end:   winMax,
+        submission_ids:  bestWindow.map(s => s.submissionId),
+        signals: { city: cityLabel, sex_counts: sexCounts, total_in_city: subs.length },
+      })
+
+      for (const sub of bestWindow) {
+        memberRows.push({
+          cluster_id: clusterId,
+          submission_id: sub.submissionId,
+          case_id: missingCaseId,
+          confidence: Math.round(confidence * 1000) / 1000,
+          confidence_reason: `Runaway/voluntary classification, same city (${cityLabel}, ${state}), within 5-year window`,
+          membership_status: 'candidate',
+          member_name: sub.name,
+          member_doe_id: sub.doeId,
+          member_location: sub.location,
+          member_date: sub.date,
+          member_age: sub.age,
+          member_sex: sub.sex,
+        })
+      }
+    }
+
+    let inserted = 0
+    for (let i = 0; i < toInsert.length; i += 50) {
+      const { error } = await supabase.from('doe_victimology_clusters' as never)
+        .insert(toInsert.slice(i, i + 50) as never)
+      if (!error) inserted += Math.min(50, toInsert.length - i)
+    }
+    for (let i = 0; i < memberRows.length; i += 100) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRows.slice(i, i + 100) as never)
+    }
+
+    return NextResponse.json({
+      action: 'location_runaway_cluster',
+      clustersInserted: inserted,
+      memberRowsInserted: memberRows.length,
+      runawayCases: runaways.length,
+      citiesChecked: cityBuckets.size,
+    })
+  }
+
+  // ── TRANSPORT CORRIDOR CLUSTER ────────────────────────────────────────────────
+  // Cases whose circumstances mention a specific major highway; 3+ per corridor = cluster
+  if (action === 'corridor_cluster') {
+    const { data: allRaw } = await supabase
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+    const parsed = (allRaw ?? []).map(parseSubmission)
+
+    const corridorBuckets = new Map<string, ParsedCase[]>()
+    const corridorLabels  = new Map<string, string>()
+
+    for (const p of parsed) {
+      // Search circumstances + location text for corridor references
+      const text = `${p.circumstances ?? ''} ${p.location ?? ''}`
+      for (const corridor of CORRIDORS) {
+        if (corridor.patterns.some(pat => pat.test(text))) {
+          if (!corridorBuckets.has(corridor.id)) corridorBuckets.set(corridor.id, [])
+          corridorBuckets.get(corridor.id)!.push(p)
+          corridorLabels.set(corridor.id, corridor.label)
+          break // One corridor per case (first match wins)
+        }
+      }
+    }
+
+    await supabase.from('doe_victimology_clusters' as never)
+      .delete().eq('case_id', missingCaseId).eq('cluster_type', 'corridor_cluster')
+
+    const toInsert: object[] = []
+    const memberRows: object[] = []
+
+    for (const [corridorId, subs] of corridorBuckets) {
+      if (subs.length < 3) continue
+      const label = corridorLabels.get(corridorId) ?? corridorId
+      const years = subs.map(s => s.year).filter(Boolean) as number[]
+      const yearMin = years.length ? Math.min(...years) : null
+      const yearMax = years.length ? Math.max(...years) : null
+
+      const stateCounts: Record<string, number> = {}
+      for (const s of subs) {
+        if (s.state) stateCounts[s.state] = (stateCounts[s.state] ?? 0) + 1
+      }
+      const topState = Object.entries(stateCounts).sort(([, a], [, b]) => b - a)[0]?.[0] ?? null
+
+      const sexCounts: Record<string, number> = {}
+      for (const s of subs) {
+        const sx = normSex(s.sex) ?? 'unknown'
+        sexCounts[sx] = (sexCounts[sx] ?? 0) + 1
+      }
+
+      const confidence = Math.min(0.90, 0.60 + subs.length * 0.04)
+      const clusterId  = crypto.randomUUID()
+      const yearRange  = yearMin && yearMax
+        ? (yearMin === yearMax ? String(yearMin) : `${yearMin}–${yearMax}`)
+        : ''
+
+      toInsert.push({
+        id: clusterId,
+        case_id: missingCaseId,
+        cluster_label: `${subs.length} cases along ${label}${yearRange ? ` (${yearRange})` : ''}`,
+        cluster_type: 'corridor_cluster',
+        state: topState,
+        case_count: subs.length,
+        year_span_start: yearMin,
+        year_span_end:   yearMax,
+        submission_ids:  subs.map(s => s.submissionId),
+        signals: { corridor_id: corridorId, corridor_label: label, state_counts: stateCounts, sex_counts: sexCounts },
+      })
+
+      for (const sub of subs) {
+        memberRows.push({
+          cluster_id: clusterId,
+          submission_id: sub.submissionId,
+          case_id: missingCaseId,
+          confidence: Math.round(confidence * 1000) / 1000,
+          confidence_reason: `Circumstances or location mention ${label}`,
+          membership_status: 'candidate',
+          member_name: sub.name,
+          member_doe_id: sub.doeId,
+          member_location: sub.location,
+          member_date: sub.date,
+          member_age: sub.age,
+          member_sex: sub.sex,
+        })
+      }
+    }
+
+    let inserted = 0
+    for (let i = 0; i < toInsert.length; i += 50) {
+      const { error } = await supabase.from('doe_victimology_clusters' as never)
+        .insert(toInsert.slice(i, i + 50) as never)
+      if (!error) inserted += Math.min(50, toInsert.length - i)
+    }
+    for (let i = 0; i < memberRows.length; i += 100) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRows.slice(i, i + 100) as never)
+    }
+
+    return NextResponse.json({
+      action: 'corridor_cluster',
+      clustersInserted: inserted,
+      memberRowsInserted: memberRows.length,
+      corridorsFound: corridorBuckets.size,
+      totalCases: parsed.length,
+    })
+  }
+
+  // ── AGE-BRACKET TIGHT CLUSTER ─────────────────────────────────────────────────
+  // 4+ cases in the same sex+state with age SD ≤ 3.5 years spanning 5+ years
+  // Signals a possible age-preference offender pattern
+  if (action === 'age_bracket_cluster') {
+    const { data: allRaw } = await supabase
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+    const parsed = (allRaw ?? []).map(parseSubmission)
+
+    // Group by sex + state
+    const buckets = new Map<string, ParsedCase[]>()
+    for (const p of parsed) {
+      const sex   = normSex(p.sex)   ?? 'unknown'
+      const state = p.state          ?? 'unknown'
+      const key   = `${sex}|${state}`
+      if (!buckets.has(key)) buckets.set(key, [])
+      buckets.get(key)!.push(p)
+    }
+
+    await supabase.from('doe_victimology_clusters' as never)
+      .delete().eq('case_id', missingCaseId).eq('cluster_type', 'age_bracket')
+
+    const toInsert: object[] = []
+    const memberRows: object[] = []
+
+    for (const [key, subs] of buckets) {
+      if (subs.length < 4) continue
+
+      // Get numeric midpoint ages
+      const withAge = subs.map(s => {
+        const r = parseAgeRange(s.age)
+        return r ? { sub: s, midAge: (r[0] + r[1]) / 2 } : null
+      }).filter(Boolean) as Array<{ sub: ParsedCase; midAge: number }>
+
+      if (withAge.length < 4) continue
+
+      const years = subs.map(s => s.year).filter(Boolean) as number[]
+      if (!years.length) continue
+      const yearMin = Math.min(...years)
+      const yearMax = Math.max(...years)
+      if (yearMax - yearMin < 5) continue // Must span 5+ years to be meaningful
+
+      const ages    = withAge.map(x => x.midAge)
+      const sd      = calcStdDev(ages)
+      if (sd > 3.5) continue // Not tight enough
+
+      const meanAge = ages.reduce((a, b) => a + b, 0) / ages.length
+      const [sex, state] = key.split('|')
+
+      const confidence = Math.min(0.92, 0.70 + (3.5 - sd) * 0.05 + subs.length * 0.01)
+      const clusterId  = crypto.randomUUID()
+      const ageRange   = `${Math.round(meanAge - sd)}–${Math.round(meanAge + sd)}`
+      const sexLabel   = sex !== 'unknown' ? `${sex} ` : ''
+      const stateLabel = state !== 'unknown' ? `, ${state}` : ''
+
+      toInsert.push({
+        id: clusterId,
+        case_id: missingCaseId,
+        cluster_label: `${withAge.length} ${sexLabel}victims — tight age bracket ${ageRange} (SD ${sd.toFixed(1)}yr)${stateLabel}, ${yearMin}–${yearMax}`,
+        cluster_type: 'age_bracket',
+        sex:  sex   !== 'unknown' ? sex   : null,
+        state: state !== 'unknown' ? state : null,
+        case_count: withAge.length,
+        year_span_start: yearMin,
+        year_span_end:   yearMax,
+        submission_ids: withAge.map(x => x.sub.submissionId),
+        signals: {
+          mean_age:   Math.round(meanAge * 10) / 10,
+          std_dev:    Math.round(sd * 10) / 10,
+          age_min:    Math.min(...ages),
+          age_max:    Math.max(...ages),
+          year_span:  yearMax - yearMin,
+          pattern:    'age_preference_predator',
+        },
+      })
+
+      for (const { sub, midAge } of withAge) {
+        const withinSd   = Math.abs(midAge - meanAge) <= sd
+        const memberConf = withinSd ? confidence : confidence * 0.85
+
+        memberRows.push({
+          cluster_id: clusterId,
+          submission_id: sub.submissionId,
+          case_id: missingCaseId,
+          confidence: Math.round(memberConf * 1000) / 1000,
+          confidence_reason: `Age ${sub.age ?? 'unknown'} — within ±${sd.toFixed(1)}yr of cluster mean (${Math.round(meanAge)})`,
+          membership_status: 'candidate',
+          member_name: sub.name,
+          member_doe_id: sub.doeId,
+          member_location: sub.location,
+          member_date: sub.date,
+          member_age: sub.age,
+          member_sex: sub.sex,
+        })
+      }
+    }
+
+    let inserted = 0
+    for (let i = 0; i < toInsert.length; i += 50) {
+      const { error } = await supabase.from('doe_victimology_clusters' as never)
+        .insert(toInsert.slice(i, i + 50) as never)
+      if (!error) inserted += Math.min(50, toInsert.length - i)
+    }
+    for (let i = 0; i < memberRows.length; i += 100) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRows.slice(i, i + 100) as never)
+    }
+
+    return NextResponse.json({
+      action: 'age_bracket_cluster',
+      clustersInserted: inserted,
+      memberRowsInserted: memberRows.length,
+      bucketsChecked: buckets.size,
+    })
+  }
+
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
 
@@ -1553,6 +1912,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ entities: data, total: count, page })
   }
 
+  if (type === 'cluster_members') {
+    const cId = params.get('clusterId')
+    if (!cId) return NextResponse.json({ error: 'clusterId required' }, { status: 400 })
+    const { data, error } = await supabase
+      .from('doe_cluster_members' as never)
+      .select('*')
+      .eq('cluster_id', cId)
+      .order('confidence', { ascending: false })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ members: data })
+  }
+
   if (type === 'clusters') {
     let q = (supabase
       .from('doe_victimology_clusters' as never)
@@ -1592,8 +1963,23 @@ export async function PATCH(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { id, type = 'match', reviewerStatus, reviewerNote } = body
-  if (!id || !reviewerStatus) return NextResponse.json({ error: 'id and reviewerStatus required' }, { status: 400 })
+  const { id, type = 'match', reviewerStatus, reviewerNote, membershipStatus, notes } = body
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+  // Cluster member — confirm / reject individual case within a cluster
+  if (type === 'cluster_member') {
+    if (!membershipStatus) return NextResponse.json({ error: 'membershipStatus required' }, { status: 400 })
+    const { error } = await supabase.from('doe_cluster_members' as never).update({
+      membership_status: membershipStatus,
+      reviewed_by:       user.id,
+      reviewed_at:       new Date().toISOString(),
+      notes:             notes ?? null,
+    } as never).eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  }
+
+  if (!reviewerStatus) return NextResponse.json({ error: 'reviewerStatus required' }, { status: 400 })
 
   const table =
     type === 'cluster' ? 'doe_victimology_clusters' :
