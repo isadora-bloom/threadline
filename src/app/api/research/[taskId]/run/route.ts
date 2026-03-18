@@ -210,24 +210,25 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
           input_schema: {
             type: 'object' as const,
             properties: {
-              confirmed: { type: 'array', items: { type: 'string' }, description: 'Facts you can confirm from knowledge — include the source or basis for each' },
-              probable: { type: 'array', items: { type: 'string' }, description: 'Reasonable inferences — include the reasoning and what would confirm each' },
-              unresolvable_without_human: { type: 'array', items: { type: 'string' }, description: 'Gaps that require a human to resolve — be specific about what action is needed' },
+              confirmed: { type: 'array', items: { type: 'string' }, description: '3–6 items max. Each item: one sentence stating the fact plus its source (archive, record group, publication, or training knowledge).' },
+              probable: { type: 'array', items: { type: 'string' }, description: '2–4 items max. Each item: one sentence stating the inference plus what would confirm it.' },
+              unresolvable_without_human: { type: 'array', items: { type: 'string' }, description: '2–4 items max. Each item: one sentence naming the specific gap and the exact action needed.' },
               human_next_steps: {
                 type: 'array',
+                description: '3–5 items max, ranked by priority.',
                 items: {
                   type: 'object',
                   properties: {
                     priority: { type: 'string', enum: ['high', 'medium', 'low'] },
-                    action: { type: 'string', description: 'Specific action with enough detail to act on today' },
-                    target: { type: 'string', description: 'Exact institution, record group, database, or person' },
-                    rationale: { type: 'string', description: 'What this could unlock' },
+                    action: { type: 'string', description: 'One sentence — specific enough to act on today.' },
+                    target: { type: 'string', description: 'Exact institution, record group, database, URL, or contact.' },
+                    rationale: { type: 'string', description: 'One sentence — what this could unlock.' },
                   },
                   required: ['priority', 'action', 'target', 'rationale'],
                 },
               },
-              follow_up_questions: { type: 'array', items: { type: 'string' }, description: 'Specific new questions this research opened that warrant their own investigation' },
-              confidence_summary: { type: 'string', description: '2-3 sentences: what is now established, the key remaining uncertainty, and the single highest-priority next action' },
+              follow_up_questions: { type: 'array', items: { type: 'string' }, description: '2–4 items max. Specific new questions this research opened.' },
+              confidence_summary: { type: 'string', description: '2–3 sentences max: what is established, the key remaining gap, the single highest-priority next action.' },
             },
             required: ['confirmed', 'probable', 'unresolvable_without_human', 'human_next_steps', 'follow_up_questions', 'confidence_summary'],
           },
@@ -235,30 +236,30 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
         tool_choice: { type: 'tool', name: 'submit_research_findings' },
         messages: [{
           role: 'user',
-          content: `You are an obsessive investigative research analyst working cold cases. You never give vague summaries — you go deep, follow every thread, and surface specific actionable leads that investigators can actually pursue.
+          content: `You are an investigative research analyst working cold cases. Be specific and actionable — name exact archives, record groups, databases, and contacts. Do not pad responses.
 
 ${caseContext}
 
 RESEARCH QUESTION: ${task.question}
 ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}
 
-INSTRUCTIONS:
-1. Exhaust everything you know. Do not stop at surface-level facts.
-2. Be obsessively specific. Not "military records may exist" — but "National Archives Record Group 92 (Office of the Quartermaster General) holds property accountability records; laundry contract records for the 1950s are in Entry 1930 or adjacent entries."
-3. Surface follow-up questions. Every piece of research opens new threads.
-4. Human next steps must be specific enough to act on TODAY — include exact record groups, FOIA language, database names where known.
-5. Never fabricate sources. Flag uncertainty where it exists.`,
+RULES:
+- Confirmed: only facts you can source (name the source)
+- Probable: reasonable inference (say what would confirm it)
+- Unresolvable: gaps only a human can close (say exactly what to do)
+- Next steps: specific enough to act on today — name the exact record group, FOIA office, or database
+- Never fabricate sources; flag uncertainty explicitly`,
         }],
       })
       const toolUse = resp.content.find(b => b.type === 'tool_use')
       if (toolUse?.type === 'tool_use') {
         const input = toolUse.input as {
-          confirmed: string[]
-          probable: string[]
-          unresolvable_without_human: string[]
-          human_next_steps: unknown[]
-          follow_up_questions: string[]
-          confidence_summary: string
+          confirmed?: string[]
+          probable?: string[]
+          unresolvable_without_human?: string[]
+          human_next_steps?: unknown[]
+          follow_up_questions?: string[]
+          confidence_summary?: string
         }
         findings = {
           confirmed: input.confirmed ?? [],
@@ -267,7 +268,7 @@ INSTRUCTIONS:
           follow_up_questions: input.follow_up_questions ?? [],
         }
         humanNextSteps = input.human_next_steps ?? []
-        confidenceSummary = input.confidence_summary ?? ''
+        confidenceSummary = input.confidence_summary ?? (resp.stop_reason === 'max_tokens' ? '[Response was cut off — findings above are partial. Re-run to get full results.]' : '')
       }
     } catch (err) {
       console.error('[research/run] Fast research error:', err)
