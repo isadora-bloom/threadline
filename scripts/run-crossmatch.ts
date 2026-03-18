@@ -473,7 +473,7 @@ async function main() {
       for (const u of unidentified) {
         const r = scoreMatch(m, u)
         if (r.eliminated) { eliminated++; continue }
-        if (r.composite < 22) continue
+        if (r.composite < 39) continue  // notable+ only — moderate/weak not stored
         toInsert.push({
           missing_submission_id:      m.submissionId,
           unidentified_submission_id: u.submissionId,
