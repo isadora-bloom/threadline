@@ -554,17 +554,43 @@ const GENERIC_IDENTIFIER_WORDS = new Set([
   'unknown','available','not',
 ])
 
+const MARK_TYPES = ['tattoo', 'scar', 'birthmark', 'brand', 'piercing', 'mark', 'mole']
+const BODY_LOCS  = ['shoulder','arm','wrist','forearm','chest','back','neck','leg','thigh','ankle','face','hand','abdomen','torso','rib','hip','calf','forehead','scalp','ear']
+const SIDE_WORDS = ['left','right','upper','lower','inner','outer']
+
 // Extract meaningful content words from marks+clothing+jewelry text
-// Strips stop words, numbers, punctuation — leaves the specific identifiers
+// Also synthesises "located mark" compounds (e.g. "left_shoulder_tattoo") so that
+// a heart tattoo on the left shoulder vs a partial tattoo on the left shoulder
+// both produce the same location compound, triggering a strong identifier match.
 function extractContentWords(p: ParsedCase): Set<string> {
   const text = [p.marks, p.clothing, p.jewelry].filter(Boolean).join(' ').toLowerCase()
   if (!text) return new Set()
-  return new Set(
+
+  const words = new Set(
     text
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
       .filter(w => w.length >= 4 && !GENERIC_IDENTIFIER_WORDS.has(w) && !/^\d+$/.test(w))
   )
+
+  // Add located-mark compounds: side+location+type and location+type
+  // e.g. "left shoulder tattoo" → synthetic token "left_shoulder_tattoo"
+  // This means two records sharing any tattoo at the same body location will match
+  // as a specific identifier even if the tattoo imagery differs.
+  for (const loc of BODY_LOCS) {
+    if (!text.includes(loc)) continue
+    for (const type of MARK_TYPES) {
+      if (!text.includes(type)) continue
+      // bare location+type compound
+      words.add(`${loc}_${type}`)
+      // with side qualifier
+      for (const side of SIDE_WORDS) {
+        if (text.includes(side)) words.add(`${side}_${loc}_${type}`)
+      }
+    }
+  }
+
+  return words
 }
 
 // Score based on shared specific content words.
@@ -1930,6 +1956,7 @@ export async function GET(req: NextRequest) {
 
   interface CQ {
     eq:    (col: string, val: string) => CQ
+    in:    (col: string, vals: string[]) => CQ
     order: (col: string, opts: object) => CQ
     range: (from: number, to: number) => Promise<{ data: unknown; count: number | null; error: { message: string } | null }>
   }
@@ -1996,7 +2023,11 @@ export async function GET(req: NextRequest) {
     .order('composite_score', { ascending: false })
 
   if (unidentifiedCaseId) q = q.eq('unidentified_case_id', unidentifiedCaseId)
-  if (grade)              q = q.eq('grade', grade)
+  if (grade === 'notable_plus') {
+    q = (q as unknown as { in: (col: string, vals: string[]) => CQ }).in('grade', ['notable', 'strong', 'very_strong'])
+  } else if (grade) {
+    q = q.eq('grade', grade)
+  }
   if (reviewerStatus)     q = q.eq('reviewer_status', reviewerStatus)
 
   const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)

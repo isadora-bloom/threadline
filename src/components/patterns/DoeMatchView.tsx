@@ -19,6 +19,16 @@ import {
   Fingerprint, Globe,
 } from 'lucide-react'
 
+interface AiAssessment {
+  verdict: 'plausible' | 'unlikely' | 'uncertain'
+  confidence: 'high' | 'medium' | 'low'
+  summary: string
+  supporting: string[]
+  conflicting: string[]
+  reviewed_at: string
+  model: string
+}
+
 interface DoeMatchCandidate {
   id: string
   missing_submission_id: string
@@ -47,6 +57,7 @@ interface DoeMatchCandidate {
   unidentified_marks: string | null
   reviewer_status: string
   reviewer_note: string | null
+  ai_assessment: AiAssessment | null
   generated_at: string
 }
 
@@ -283,10 +294,12 @@ function MatchCard({ match, onReview }: {
   }
 
   const isDismissed = match.reviewer_status === 'dismissed'
+  const aiPlausible = match.ai_assessment?.verdict === 'plausible'
+  const aiUnlikely  = match.ai_assessment?.verdict === 'unlikely'
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <Card className={`overflow-hidden transition-opacity ${isDismissed ? 'opacity-40' : ''}`}>
+      <Card className={`overflow-hidden transition-opacity ${isDismissed ? 'opacity-40' : ''} ${aiPlausible ? 'border-green-300 bg-green-50/30' : aiUnlikely ? 'border-slate-200 opacity-60' : ''}`}>
         <CollapsibleTrigger asChild>
           <button className="w-full text-left">
             <CardContent className="p-4">
@@ -345,6 +358,16 @@ function MatchCard({ match, onReview }: {
 
                 {/* Right side */}
                 <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                  {match.ai_assessment && (
+                    <Badge className={`text-[10px] flex items-center gap-1 ${
+                      match.ai_assessment.verdict === 'plausible' ? 'bg-green-100 text-green-700 border-green-200' :
+                      match.ai_assessment.verdict === 'unlikely'  ? 'bg-slate-100 text-slate-500 border-slate-200' :
+                      'bg-amber-50 text-amber-600 border-amber-200'
+                    }`}>
+                      <Sparkles className="h-2.5 w-2.5" />
+                      AI: {match.ai_assessment.verdict}
+                    </Badge>
+                  )}
                   <Badge className={`text-[10px] ${STATUS_STYLE[match.reviewer_status]}`}>
                     {match.reviewer_status.replace(/_/g, ' ')}
                   </Badge>
@@ -445,6 +468,45 @@ function MatchCard({ match, onReview }: {
                 </div>
               )
             })()}
+
+            {/* AI assessment panel */}
+            {match.ai_assessment && (
+              <div className={`p-3 rounded border space-y-1.5 ${
+                match.ai_assessment.verdict === 'plausible' ? 'bg-green-50 border-green-200' :
+                match.ai_assessment.verdict === 'unlikely'  ? 'bg-slate-50 border-slate-200' :
+                'bg-amber-50 border-amber-200'
+              }`}>
+                <p className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${
+                  match.ai_assessment.verdict === 'plausible' ? 'text-green-700' :
+                  match.ai_assessment.verdict === 'unlikely'  ? 'text-slate-500' :
+                  'text-amber-700'
+                }`}>
+                  <Sparkles className="h-3 w-3" />
+                  AI assessment — {match.ai_assessment.verdict}
+                  <span className="font-normal normal-case opacity-60 ml-1">({match.ai_assessment.confidence} confidence)</span>
+                </p>
+                <p className="text-[11px] text-slate-700 leading-relaxed">{match.ai_assessment.summary}</p>
+                {match.ai_assessment.supporting.length > 0 && (
+                  <ul className="space-y-0.5">
+                    {match.ai_assessment.supporting.map((s, i) => (
+                      <li key={i} className="text-[10px] text-green-700 flex items-start gap-1">
+                        <CheckCircle className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />{s}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {match.ai_assessment.conflicting.length > 0 && (
+                  <ul className="space-y-0.5">
+                    {match.ai_assessment.conflicting.map((s, i) => (
+                      <li key={i} className="text-[10px] text-red-600 flex items-start gap-1">
+                        <XCircle className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />{s}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-[9px] text-slate-400">AI-generated signal only. Not a conclusion. Requires investigator review.</p>
+              </div>
+            )}
 
             {/* Epistemic notice */}
             <div className="flex items-start gap-2 p-2 bg-amber-50 border border-amber-100 rounded text-[10px] text-amber-700">
@@ -1061,7 +1123,7 @@ function EntityCard({ entity }: { entity: DoeEntityMention }) {
 export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'matches' | 'clusters' | 'stalls' | 'entities'>('matches')
-  const [gradeFilter, setGradeFilter] = useState('all')
+  const [gradeFilter, setGradeFilter] = useState('notable_plus')
   const [statusFilter, setStatusFilter] = useState('unreviewed')
   const [page, setPage] = useState(0)
 
@@ -1084,6 +1146,8 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [dedupRunning, setDedupRunning] = useState(false)
   const [stallsRunning, setStallsRunning] = useState(false)
   const [confirmRunning, setConfirmRunning] = useState(false)
+  const [aiReviewRunning, setAiReviewRunning] = useState(false)
+  const [aiReviewProgress, setAiReviewProgress] = useState<{ reviewed: number; remaining: number } | null>(null)
   const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity' | 'location_runaway_cluster' | 'corridor_cluster' | 'age_bracket'>('all')
   const [stallTypeFilter, setStallTypeFilter] = useState<'all' | 'voluntary_misclassification' | 'runaway_no_followup' | 'quick_closure_young'>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
@@ -1379,6 +1443,28 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     })
   }, [])
 
+  const runAiReviews = useCallback(async () => {
+    setAiReviewRunning(true)
+    setAiReviewProgress({ reviewed: 0, remaining: 0 })
+    let totalReviewed = 0
+    try {
+      while (true) {
+        const res = await fetch('/api/pattern/doe-match/ai-review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ missingCaseId: effectiveCaseId, batchSize: 15 }),
+        })
+        const data = await res.json() as { reviewed: number; hasMore: boolean; remaining: number }
+        totalReviewed += data.reviewed
+        setAiReviewProgress({ reviewed: totalReviewed, remaining: data.remaining })
+        if (!data.hasMore || data.reviewed === 0) break
+      }
+      queryClient.invalidateQueries({ queryKey: ['doe-matches', effectiveCaseId] })
+    } finally {
+      setAiReviewRunning(false)
+    }
+  }, [effectiveCaseId, queryClient])
+
   const allMatches = matchQuery.data?.matches ?? []
   const matches = allMatches
     .filter(m => signalCountFilter === 0 || countPositiveSignals(m.signals) >= signalCountFilter)
@@ -1422,7 +1508,11 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const totalEntities = entityQuery.data?.total  ?? 0
   const PAGE_SIZE = 50
 
-  const GRADE_FILTERS = ['all', 'very_strong', 'strong', 'notable', 'moderate']
+  const GRADE_FILTERS = ['all', 'notable_plus', 'very_strong', 'strong', 'notable', 'moderate']
+  const GRADE_FILTER_LABELS: Record<string, string> = {
+    all: 'All', notable_plus: 'Notable+', very_strong: 'Very strong',
+    strong: 'Strong', notable: 'Notable', moderate: 'Moderate',
+  }
   const STATUS_FILTERS = [
     { value: 'all', label: 'All' },
     { value: 'unreviewed', label: 'Unreviewed' },
@@ -1454,6 +1544,13 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                 {runState.running ? `Matching… ${runState.processed}/${runState.total}` : 'Cross-match'}
               </Button>
             )}
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-green-200 text-green-700 hover:bg-green-50"
+              disabled={aiReviewRunning} onClick={runAiReviews}>
+              {aiReviewRunning
+                ? <><Loader2 className="h-3 w-3 animate-spin" />AI reviewing… {aiReviewProgress?.reviewed ?? 0}</>
+                : <><Sparkles className="h-3 w-3" />AI review very strong</>
+              }
+            </Button>
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
               disabled={clusterRunning} onClick={runCluster}>
               {clusterRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Users className="h-3 w-3" />}
@@ -1570,9 +1667,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
             <div className="flex gap-1 flex-wrap">
               {GRADE_FILTERS.map(g => (
                 <button key={g} onClick={() => { setGradeFilter(g); setPage(0) }}
-                  className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors capitalize
+                  className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
                     ${gradeFilter === g ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
-                  {g === 'all' ? 'All grades' : GRADE_LABEL[g]}
+                  {GRADE_FILTER_LABELS[g] ?? g}
                 </button>
               ))}
             </div>

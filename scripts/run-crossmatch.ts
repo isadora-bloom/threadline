@@ -159,6 +159,9 @@ const STATE_ADJ: Record<string, string[]> = {
   NY:['NJ','CT','MA','VT','PA'], PA:['NY','NJ','DE','MD','WV','OH'],
   WA:['OR','ID'], OR:['WA','ID','NV','CA'],
 }
+const MARK_TYPES = ['tattoo','scar','birthmark','brand','piercing','mark','mole']
+const BODY_LOCS  = ['shoulder','arm','wrist','forearm','chest','back','neck','leg','thigh','ankle','face','hand','abdomen','torso','rib','hip','calf','forehead','scalp','ear']
+const SIDE_WORDS = ['left','right','upper','lower','inner','outer']
 const GENERIC_ID_WORDS = new Set([
   'tattoo','scar','mark','left','right','upper','lower','inner','outer','small','large',
   'arm','leg','chest','back','neck','hand','shoulder','wrist','ankle','face','forehead',
@@ -168,7 +171,19 @@ const GENERIC_ID_WORDS = new Set([
 function extractContentWords(p: ParsedCase): Set<string> {
   const text = [p.marks, p.clothing, p.jewelry].filter(Boolean).join(' ').toLowerCase()
   if (!text) return new Set()
-  return new Set(text.replace(/[^\w\s]/g,' ').split(/\s+/).filter(w => w.length >= 4 && !GENERIC_ID_WORDS.has(w) && !/^\d+$/.test(w)))
+  const words = new Set(text.replace(/[^\w\s]/g,' ').split(/\s+/).filter(w => w.length >= 4 && !GENERIC_ID_WORDS.has(w) && !/^\d+$/.test(w)))
+  // Synthesize located-mark compound tokens so "left shoulder tattoo" matches across records
+  for (const loc of BODY_LOCS) {
+    if (!text.includes(loc)) continue
+    for (const type of MARK_TYPES) {
+      if (!text.includes(type)) continue
+      words.add(`${loc}_${type}`)
+      for (const side of SIDE_WORDS) {
+        if (text.includes(side)) words.add(`${side}_${loc}_${type}`)
+      }
+    }
+  }
+  return words
 }
 function scoreUniqueId(a: ParsedCase, b: ParsedCase) {
   const wA = extractContentWords(a), wB = extractContentWords(b)
@@ -391,6 +406,28 @@ async function main() {
   console.log(`\nMissing:      ${missingCase.id}`)
   unidentifiedCases.forEach(c => console.log(`Unidentified: ${c.id}  (${c.title})`))
 
+  // Delete all existing unreviewed match candidates for a clean rescore
+  console.log('\nClearing unreviewed match candidates…')
+  let deletedTotal = 0
+  while (true) {
+    const { data: ids } = await supabase
+      .from('doe_match_candidates')
+      .select('id')
+      .eq('missing_case_id', missingCase.id)
+      .eq('reviewer_status', 'unreviewed')
+      .limit(500)
+    if (!ids?.length) break
+    const { error } = await supabase
+      .from('doe_match_candidates')
+      .delete()
+      .in('id', ids.map((r: { id: string }) => r.id))
+    if (error) { console.error(`  Delete error: ${error.message}`); break }
+    deletedTotal += ids.length
+    process.stdout.write(`\r  Deleted ${deletedTotal} unreviewed candidates…`)
+    if (ids.length < 500) break
+  }
+  console.log(`\r  Deleted ${deletedTotal} unreviewed candidates. Human-reviewed pairs preserved.`)
+
   // Load ALL unidentified remains from ALL unidentified cases
   console.log('\nLoading unidentified remains…')
   const unidentified: ReturnType<typeof parseSubmission>[] = []
@@ -429,24 +466,11 @@ async function main() {
     const missing = (missingRaw ?? []).map(s => parseSubmission(s as RawSub))
     if (!missing.length) break
 
-    // Check existing pairs to avoid re-scoring
-    const missingIds = missing.map(p => p.submissionId)
-    const { data: existing } = await supabase
-      .from('doe_match_candidates')
-      .select('missing_submission_id, unidentified_submission_id')
-      .in('missing_submission_id', missingIds)
-
-    const existingPairs = new Set(
-      ((existing ?? []) as Array<{ missing_submission_id: string; unidentified_submission_id: string }>)
-        .map(e => `${e.missing_submission_id}__${e.unidentified_submission_id}`)
-    )
-
     const toInsert: object[] = []
     let eliminated = 0
 
     for (const m of missing) {
       for (const u of unidentified) {
-        if (existingPairs.has(`${m.submissionId}__${u.submissionId}`)) continue
         const r = scoreMatch(m, u)
         if (r.eliminated) { eliminated++; continue }
         if (r.composite < 22) continue
@@ -477,10 +501,7 @@ async function main() {
     for (let i = 0; i < toInsert.length; i += 100) {
       const { error } = await supabase
         .from('doe_match_candidates')
-        .upsert(toInsert.slice(i, i + 100) as never, {
-          onConflict: 'missing_submission_id,unidentified_submission_id',
-          ignoreDuplicates: true,
-        })
+        .insert(toInsert.slice(i, i + 100) as never)
       if (error) {
         process.stdout.write('\n')
         console.error(`  ✗ Upsert error (batch ${i/100+1}): ${error.message}`)
