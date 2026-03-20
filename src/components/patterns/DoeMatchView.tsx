@@ -643,6 +643,7 @@ const CLUSTER_TYPE_META: Record<string, { label: string; borderColor: string; ic
   location_runaway_cluster: { label: 'Location runaway', borderColor: 'border-l-orange-400', iconBg: 'bg-orange-100',  iconColor: 'text-orange-600' },
   corridor_cluster:         { label: 'Corridor',        borderColor: 'border-l-cyan-400',    iconBg: 'bg-cyan-100',    iconColor: 'text-cyan-600' },
   age_bracket:              { label: 'Age bracket',     borderColor: 'border-l-purple-400',  iconBg: 'bg-purple-100',  iconColor: 'text-purple-600' },
+  demographic_hotspot:      { label: 'Hotspot',         borderColor: 'border-l-red-400',     iconBg: 'bg-red-100',     iconColor: 'text-red-600' },
 }
 
 const MEMBER_STATUS_STYLE: Record<string, string> = {
@@ -651,10 +652,31 @@ const MEMBER_STATUS_STYLE: Record<string, string> = {
   rejected:  'bg-red-50 text-red-500',
 }
 
-function ClusterMemberRow({ member, onReviewMember }: {
+function ClusterMemberRow({ member, missingCaseId, onReviewMember }: {
   member: DoeClusterMember
+  missingCaseId: string
   onReviewMember: (id: string, status: 'confirmed' | 'rejected' | 'candidate') => void
 }) {
+  const [showRecord, setShowRecord] = useState(false)
+  const [record, setRecord] = useState<string | null>(null)
+  const [recordLoading, setRecordLoading] = useState(false)
+
+  async function loadRecord() {
+    if (record !== null) { setShowRecord(v => !v); return }
+    setRecordLoading(true)
+    try {
+      const res = await fetch(`/api/pattern/doe-match?missingCaseId=${missingCaseId}&type=submission&submissionId=${member.submission_id}`)
+      const data = await res.json()
+      setRecord(data.raw_text ?? 'Record not found.')
+      setShowRecord(true)
+    } catch {
+      setRecord('Could not load record.')
+      setShowRecord(true)
+    } finally {
+      setRecordLoading(false)
+    }
+  }
+
   const pct = Math.round(member.confidence * 100)
   const isRejected = member.membership_status === 'rejected'
 
@@ -677,6 +699,25 @@ function ClusterMemberRow({ member, onReviewMember }: {
         </div>
         {member.confidence_reason && (
           <div className="text-slate-400 italic mt-0.5 truncate">{member.confidence_reason}</div>
+        )}
+        {member.notes && (
+          <div className="text-slate-400 mt-0.5 text-[9px] leading-snug line-clamp-2">{member.notes}</div>
+        )}
+        <button
+          onClick={loadRecord}
+          className="text-[9px] text-indigo-400 hover:text-indigo-600 mt-0.5 flex items-center gap-0.5"
+        >
+          {recordLoading
+            ? <><Loader2 className="h-2 w-2 animate-spin" />Loading…</>
+            : showRecord
+            ? <><ChevronUp className="h-2 w-2" />Hide record</>
+            : <><ChevronDown className="h-2 w-2" />View full record</>
+          }
+        </button>
+        {showRecord && record && (
+          <pre className="mt-1 text-[9px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto font-mono">
+            {record}
+          </pre>
         )}
       </div>
 
@@ -723,7 +764,7 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
   const isCircumstance = cluster.cluster_type === 'circumstance_signal'
 
   // Load members when expanded (only for new cluster types that have member rows)
-  const hasMembers = ['location_runaway_cluster', 'corridor_cluster', 'age_bracket'].includes(cluster.cluster_type)
+  const hasMembers = ['location_runaway_cluster', 'corridor_cluster', 'age_bracket', 'demographic_hotspot'].includes(cluster.cluster_type)
 
   async function loadMembers() {
     if (!hasMembers || members !== null) return
@@ -825,6 +866,16 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                     {cluster.cluster_type === 'age_bracket' && clusterSig.std_dev !== undefined && (
                       <Badge className="text-[10px] bg-purple-50 text-purple-700 border-purple-200">
                         SD {clusterSig.std_dev}yr
+                      </Badge>
+                    )}
+                    {cluster.cluster_type === 'demographic_hotspot' && (clusterSig as { anomaly_ratio?: number }).anomaly_ratio !== undefined && (
+                      <Badge className="text-[10px] bg-red-50 text-red-700 border-red-200 font-bold">
+                        {(clusterSig as { anomaly_ratio: number }).anomaly_ratio}× expected
+                      </Badge>
+                    )}
+                    {cluster.cluster_type === 'demographic_hotspot' && (clusterSig as { city?: string }).city && (
+                      <Badge className="text-[10px] bg-red-50 text-red-700 border-red-200">
+                        <MapPin className="h-2.5 w-2.5 mr-0.5" />{(clusterSig as { city: string }).city}
                       </Badge>
                     )}
                     {cluster.state && (
@@ -951,6 +1002,41 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
               </div>
             )}
 
+            {/* Hotspot anomaly stats */}
+            {cluster.cluster_type === 'demographic_hotspot' && (clusterSig as { anomaly_ratio?: number; expected_count?: number; city_total?: number; national_rate_pct?: number; decade?: number; top_circumstance_signals?: string[] }).anomaly_ratio !== undefined && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-4 p-2 bg-red-50 border border-red-100 rounded text-[10px]">
+                  <div className="text-center">
+                    <div className="text-base font-black text-red-700">{(clusterSig as { anomaly_ratio: number }).anomaly_ratio}×</div>
+                    <div className="text-red-400">anomaly ratio</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-base font-black text-red-700">{(clusterSig as { observed_count: number }).observed_count ?? cluster.case_count}</div>
+                    <div className="text-red-400">observed</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-base font-black text-slate-500">{(clusterSig as { expected_count: number }).expected_count}</div>
+                    <div className="text-slate-400">expected</div>
+                  </div>
+                  <div className="text-red-700 text-[10px] italic leading-snug flex-1">
+                    {(clusterSig as { national_rate_pct: number }).national_rate_pct}% of missing persons nationally are {cluster.race} {cluster.sex}. In this city and decade: {Math.round(((clusterSig as { observed_count: number }).observed_count / ((clusterSig as { city_total: number }).city_total || 1)) * 100)}%.
+                  </div>
+                </div>
+                {(clusterSig as { top_circumstance_signals?: string[] }).top_circumstance_signals?.length ? (
+                  <div>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Shared circumstance signals</p>
+                    <div className="flex flex-wrap gap-1">
+                      {(clusterSig as { top_circumstance_signals: string[] }).top_circumstance_signals.map(sig => (
+                        <span key={sig} className="text-[10px] bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded">
+                          {sig.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
             {/* Member list — for location_runaway_cluster, corridor_cluster, age_bracket */}
             {hasMembers && (
               <div>
@@ -972,7 +1058,7 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                 {!membersLoading && members && members.length > 0 && (
                   <div className="space-y-1.5 max-h-64 overflow-y-auto">
                     {members.map(m => (
-                      <ClusterMemberRow key={m.id} member={m} onReviewMember={handleMemberReview} />
+                      <ClusterMemberRow key={m.id} member={m} missingCaseId={missingCaseId} onReviewMember={handleMemberReview} />
                     ))}
                   </div>
                 )}
@@ -1168,6 +1254,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [locationRunawayRunning, setLocationRunawayRunning] = useState(false)
   const [corridorRunning, setCorridorRunning] = useState(false)
   const [ageBracketRunning, setAgeBracketRunning] = useState(false)
+  const [hotspotRunning, setHotspotRunning] = useState(false)
+  const [allClustersRunning, setAllClustersRunning] = useState(false)
+  const [allClustersStep, setAllClustersStep] = useState('')
   const [entitiesRunning, setEntitiesRunning] = useState(false)
   const [dedupRunning, setDedupRunning] = useState(false)
   const [stallsRunning, setStallsRunning] = useState(false)
@@ -1464,6 +1553,45 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     } finally { setAgeBracketRunning(false) }
   }, [caseId, queryClient])
 
+  const runHotspot = useCallback(async () => {
+    setHotspotRunning(true)
+    try {
+      await fetch('/api/pattern/doe-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'demographic_hotspot', missingCaseId: effectiveCaseId }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
+    } finally { setHotspotRunning(false) }
+  }, [effectiveCaseId, queryClient])
+
+  const runAllClusters = useCallback(async () => {
+    setAllClustersRunning(true)
+    const steps = [
+      { label: 'Demographics…',   action: 'cluster' },
+      { label: 'Circumstances…',  action: 'circumstance_cluster' },
+      { label: 'Date clusters…',  action: 'same_date_cluster' },
+      { label: 'Hotspot…',        action: 'demographic_hotspot' },
+      { label: 'Location…',       action: 'location_runaway_cluster' },
+      { label: 'Corridors…',      action: 'corridor_cluster' },
+      { label: 'Age bracket…',    action: 'age_bracket_cluster' },
+    ]
+    try {
+      for (const step of steps) {
+        setAllClustersStep(step.label)
+        await fetch('/api/pattern/doe-match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: step.action, missingCaseId: effectiveCaseId }),
+        })
+      }
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
+    } finally {
+      setAllClustersRunning(false)
+      setAllClustersStep('')
+    }
+  }, [effectiveCaseId, queryClient])
+
   const reviewClusterMember = useCallback(async (id: string, membershipStatus: 'confirmed' | 'rejected' | 'candidate') => {
     await fetch('/api/pattern/doe-match', {
       method: 'PATCH',
@@ -1627,6 +1755,15 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               {ageBracketRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scale className="h-3 w-3" />}
               {ageBracketRunning ? 'Scanning…' : 'Age bracket'}
             </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-red-200 text-red-700 hover:bg-red-50"
+              disabled={hotspotRunning} onClick={runHotspot}>
+              {hotspotRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Users className="h-3 w-3" />}
+              {hotspotRunning ? 'Scanning…' : 'Hotspot'}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-slate-300 text-slate-700 hover:bg-slate-50 font-medium"
+              disabled={allClustersRunning} onClick={runAllClusters}>
+              {allClustersRunning ? <><Loader2 className="h-3 w-3 animate-spin" />{allClustersStep}</> : 'Run all clusters'}
+            </Button>
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
               disabled={entitiesRunning} onClick={runExtractEntities}>
               {entitiesRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Car className="h-3 w-3" />}
@@ -1780,6 +1917,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               { value: 'location_runaway_cluster', label: 'Location runaway' },
               { value: 'corridor_cluster',         label: 'Corridor' },
               { value: 'age_bracket',              label: 'Age bracket' },
+              { value: 'demographic_hotspot',      label: 'Hotspot' },
             ] as const).map(f => (
               <button key={f.value} onClick={() => { setClusterTypeFilter(f.value); setPage(0) }}
                 className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors

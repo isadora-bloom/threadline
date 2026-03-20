@@ -1977,6 +1977,175 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // ── DEMOGRAPHIC HOTSPOT CLUSTER ───────────────────────────────────────────────
+  // City-level statistical anomaly: 5+ people of same sex/race disappearing
+  // from the same city in a 10-year window at 2x+ the expected rate.
+  // Expected rate is calculated from the dataset itself as the null hypothesis.
+  if (action === 'demographic_hotspot') {
+    const { data: allRaw } = await supabase
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+    const parsed = (allRaw ?? []).map(s => parseSubmission(s as RawSubmission))
+
+    // Delete old hotspot clusters and their members
+    const { data: oldClusters } = await supabase
+      .from('doe_victimology_clusters' as never)
+      .select('id')
+      .eq('case_id', missingCaseId)
+      .eq('cluster_type', 'demographic_hotspot') as { data: Array<{ id: string }> | null }
+    if (oldClusters?.length) {
+      const oldIds = oldClusters.map(c => c.id)
+      await supabase.from('doe_cluster_members' as never).delete().in('cluster_id', oldIds)
+      await supabase.from('doe_victimology_clusters' as never).delete().in('id', oldIds)
+    }
+
+    function extractCity(loc: string | null): string | null {
+      if (!loc) return null
+      const city = loc.split(',')[0].trim()
+      if (city.length < 3 || /unknown|unclear|various|anywhere/i.test(city)) return null
+      return city
+    }
+
+    // National demographic rates within this dataset (our null hypothesis)
+    const parsedWithDemo = parsed.filter(p => normSex(p.sex) && normRace(p.race))
+    const totalWithDemo = parsedWithDemo.length
+    if (!totalWithDemo) return NextResponse.json({ error: 'Insufficient demographic data' }, { status: 400 })
+
+    const demoRates = new Map<string, number>()
+    for (const p of parsedWithDemo) {
+      const key = `${normSex(p.sex)}|${normRace(p.race)}`
+      demoRates.set(key, (demoRates.get(key) ?? 0) + 1)
+    }
+    for (const [key, count] of demoRates) demoRates.set(key, count / totalWithDemo)
+
+    // Add city to each record
+    const withCity = parsed
+      .filter(p => p.year && normSex(p.sex) && normRace(p.race))
+      .map(p => ({ ...p, city: extractCity(p.location) }))
+      .filter(p => p.city !== null) as (ParsedCase & { city: string })[]
+
+    // City totals (denominator for expected calculation)
+    const cityTotals = new Map<string, number>()
+    for (const p of withCity) cityTotals.set(p.city, (cityTotals.get(p.city) ?? 0) + 1)
+
+    // 10-year window buckets: city + sex + race + age_group + decade
+    const HOTSPOT_WINDOW = 10
+    const buckets = new Map<string, (ParsedCase & { city: string })[]>()
+    for (const p of withCity) {
+      const decade = Math.floor(p.year! / HOTSPOT_WINDOW) * HOTSPOT_WINDOW
+      const key = `${p.city}|${normSex(p.sex)}|${normRace(p.race)}|${ageGroup(p.age)}|${decade}`
+      if (!buckets.has(key)) buckets.set(key, [])
+      buckets.get(key)!.push(p)
+    }
+
+    const toInsertClusters: object[] = []
+    const toInsertMembers: object[] = []
+
+    for (const [key, subs] of buckets) {
+      if (subs.length < 5) continue
+      const [city, sex, race, ag, decadeStr] = key.split('|')
+      const decade = parseInt(decadeStr)
+      const cityTotal = cityTotals.get(city) ?? 0
+      if (cityTotal < 10) continue  // too small a city sample
+      const nationalRate = demoRates.get(`${sex}|${race}`) ?? 0
+      const expected = cityTotal * nationalRate
+      if (expected < 1) continue
+      const anomalyRatio = subs.length / expected
+      if (anomalyRatio < 2.0) continue
+
+      const years = subs.map(s => s.year).filter(Boolean) as number[]
+      const yearMin = Math.min(...years)
+      const yearMax = Math.max(...years)
+
+      const ageGroupLabels: Record<string, string> = {
+        child: 'children', teen: 'teens', young_adult: 'young adults',
+        adult: 'adults', middle_age: 'middle-aged adults', senior: 'seniors',
+      }
+      const raceLabel = race === 'unknown' ? 'unknown race' : race
+      const label = `${subs.length} ${raceLabel} ${sex} ${ageGroupLabels[ag] ?? ag} · ${city} · ${decade}s · ${anomalyRatio.toFixed(1)}× expected`
+
+      const clusterId = crypto.randomUUID()
+
+      // Collect circumstance co-signals for this group
+      const coSignals = new Map<string, number>()
+      for (const sub of subs) {
+        for (const sig of extractCircumstanceSignals(sub)) {
+          coSignals.set(sig, (coSignals.get(sig) ?? 0) + 1)
+        }
+      }
+      const topSignals = [...coSignals.entries()]
+        .filter(([, c]) => c >= Math.ceil(subs.length * 0.3))
+        .sort(([, a], [, b]) => b - a).slice(0, 5).map(([sig]) => sig)
+
+      toInsertClusters.push({
+        id: clusterId,
+        case_id: missingCaseId,
+        cluster_label: label,
+        cluster_type: 'demographic_hotspot',
+        sex,
+        race,
+        age_group: ag === 'unknown' ? null : ag,
+        state: subs[0].state ?? null,
+        year_span_start: yearMin,
+        year_span_end: yearMax,
+        case_count: subs.length,
+        submission_ids: subs.map(s => s.submissionId),
+        signals: {
+          city,
+          anomaly_ratio: parseFloat(anomalyRatio.toFixed(2)),
+          expected_count: parseFloat(expected.toFixed(1)),
+          observed_count: subs.length,
+          city_total: cityTotal,
+          national_rate_pct: parseFloat((nationalRate * 100).toFixed(1)),
+          decade,
+          top_circumstance_signals: topSignals,
+          co_signals: Object.fromEntries(coSignals),
+        },
+      })
+
+      for (const sub of subs) {
+        toInsertMembers.push({
+          cluster_id: clusterId,
+          submission_id: sub.submissionId,
+          confidence: Math.min(0.99, parseFloat((0.4 + Math.min(anomalyRatio / 10, 0.59)).toFixed(2))),
+          confidence_reason: `${anomalyRatio.toFixed(1)}× expected rate — ${subs.length} ${race} ${sex} in ${city} (${decade}s vs ${nationalRate > 0 ? (nationalRate * 100).toFixed(0) : '?'}% national rate)`,
+          membership_status: 'candidate',
+          member_name: sub.name,
+          member_doe_id: sub.doeId,
+          member_location: sub.location,
+          member_date: sub.date,
+          member_age: sub.age,
+          member_sex: sub.sex,
+          notes: sub.circumstances?.slice(0, 300) ?? null,
+        })
+      }
+    }
+
+    // Sort by anomaly ratio descending
+    toInsertClusters.sort((a, b) =>
+      (b as { signals: { anomaly_ratio: number } }).signals.anomaly_ratio -
+      (a as { signals: { anomaly_ratio: number } }).signals.anomaly_ratio
+    )
+
+    let insertedClusters = 0
+    for (let i = 0; i < toInsertClusters.length; i += 50) {
+      const { error } = await supabase.from('doe_victimology_clusters' as never)
+        .insert(toInsertClusters.slice(i, i + 50) as never)
+      if (!error) insertedClusters += Math.min(50, toInsertClusters.length - i)
+    }
+    for (let i = 0; i < toInsertMembers.length; i += 100) {
+      await supabase.from('doe_cluster_members' as never)
+        .insert(toInsertMembers.slice(i, i + 100) as never)
+    }
+
+    return NextResponse.json({
+      action: 'demographic_hotspot',
+      clustersInserted: insertedClusters,
+      membersInserted: toInsertMembers.length,
+      totalCasesAnalyzed: withCity.length,
+      anomalyThreshold: '2.0×',
+    })
+  }
+
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
 
@@ -2010,6 +2179,14 @@ export async function GET(req: NextRequest) {
     in:    (col: string, vals: string[]) => CQ
     order: (col: string, opts: object) => CQ
     range: (from: number, to: number) => Promise<{ data: unknown; count: number | null; error: { message: string } | null }>
+  }
+
+  if (type === 'submission') {
+    const submissionId = params.get('submissionId')
+    if (!submissionId) return NextResponse.json({ error: 'submissionId required' }, { status: 400 })
+    const { data } = await supabase
+      .from('submissions' as never).select('raw_text').eq('id', submissionId).single() as { data: { raw_text: string } | null }
+    return NextResponse.json({ raw_text: data?.raw_text ?? null })
   }
 
   if (type === 'stalls') {
