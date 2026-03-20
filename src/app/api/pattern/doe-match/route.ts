@@ -1314,7 +1314,7 @@ export async function POST(req: NextRequest) {
   // ── DEMOGRAPHIC / TEMPORAL CLUSTER ───────────────────────────────────────────
   if (action === 'cluster') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(parseSubmission)
 
     await supabase.from('doe_victimology_clusters' as never)
@@ -1388,7 +1388,7 @@ export async function POST(req: NextRequest) {
   // ── CIRCUMSTANCE CLUSTERING ───────────────────────────────────────────────────
   if (action === 'circumstance_cluster') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(parseSubmission)
 
     // Extract signals for each case
@@ -1562,7 +1562,7 @@ export async function POST(req: NextRequest) {
   // ── SAME DATE CLUSTER ────────────────────────────────────────────────────────
   if (action === 'same_date_cluster') {
     const { data: subs } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     if (!subs?.length) return NextResponse.json({ error: 'No submissions found' }, { status: 404 })
 
     const parsed = (subs as RawSubmission[]).map(parseSubmission).filter(p => p.year && p.state)
@@ -1610,7 +1610,7 @@ export async function POST(req: NextRequest) {
 
     for (const [key, cases] of monthBuckets) {
       if (cases.length < 3) continue
-      const [state, , monthStr] = key.split('_m')
+      const [state, monthStr] = key.split('_m')
       const month = parseInt(monthStr)
       const years = [...new Set(cases.map(c => c.year).filter(Boolean) as number[])].sort((a, b) => a - b)
       if (years.length < 2) continue
@@ -1649,7 +1649,7 @@ export async function POST(req: NextRequest) {
   // ── EXTRACT ENTITIES ─────────────────────────────────────────────────────────
   if (action === 'extract_entities') {
     const { data: subs } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     if (!subs?.length) return NextResponse.json({ error: 'No submissions found' }, { status: 404 })
 
     // Clear existing
@@ -1699,7 +1699,7 @@ export async function POST(req: NextRequest) {
   // ── NAME DEDUPLICATION ────────────────────────────────────────────────────────
   if (action === 'name_dedup') {
     const { data: subs } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     if (!subs?.length) return NextResponse.json({ error: 'No submissions found' }, { status: 404 })
 
     const named = (subs as RawSubmission[])
@@ -1761,7 +1761,7 @@ export async function POST(req: NextRequest) {
   // ── DETECT INVESTIGATIVE STALLS ───────────────────────────────────────────────
   if (action === 'detect_stalls') {
     const { data: subs } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     if (!subs?.length) return NextResponse.json({ error: 'No submissions found' }, { status: 404 })
 
     // Clear previous
@@ -1845,7 +1845,7 @@ export async function POST(req: NextRequest) {
   // 3+ runaway/voluntary classified cases from the same city within any 5-year window
   if (action === 'location_runaway_cluster') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(parseSubmission)
 
     // Only runaway/voluntary-flagged cases with a location + year
@@ -1951,7 +1951,7 @@ export async function POST(req: NextRequest) {
   // Cases whose circumstances mention a specific major highway; 3+ per corridor = cluster
   if (action === 'corridor_cluster') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(parseSubmission)
 
     const corridorBuckets = new Map<string, ParsedCase[]>()
@@ -2056,7 +2056,7 @@ export async function POST(req: NextRequest) {
   // Signals a possible age-preference offender pattern
   if (action === 'age_bracket_cluster') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(parseSubmission)
 
     // Group by sex + state
@@ -2171,7 +2171,7 @@ export async function POST(req: NextRequest) {
   // Expected rate is calculated from the dataset itself as the null hypothesis.
   if (action === 'demographic_hotspot') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(s => parseSubmission(s as RawSubmission))
 
     // Delete old hotspot clusters and their members
@@ -2340,7 +2340,7 @@ export async function POST(req: NextRequest) {
   // Uses city lookup rather than text mention (different from corridor_cluster).
   if (action === 'highway_proximity') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(s => parseSubmission(s as RawSubmission))
 
     // Delete old highway_proximity clusters
@@ -2473,7 +2473,7 @@ export async function POST(req: NextRequest) {
   // investigator attention for dumping vs. lost hiker pattern.
   if (action === 'national_park_proximity') {
     const { data: allRaw } = await supabase
-      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(s => parseSubmission(s as RawSubmission))
 
     // Delete old clusters
