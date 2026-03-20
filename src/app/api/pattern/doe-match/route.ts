@@ -1174,9 +1174,22 @@ function extractPersonNames(text: string): { value: string; snippet: string }[] 
 // ─── API handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Internal script access: X-Internal-Key header with service role key bypasses cookie auth
+  const internalKey = req.headers.get('x-internal-key')
+  const isInternal  = internalKey && internalKey === process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  let supabase: Awaited<ReturnType<typeof createClient>>
+  if (isInternal) {
+    const { createClient: createSvcClient } = await import('@supabase/supabase-js')
+    supabase = createSvcClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    ) as unknown as Awaited<ReturnType<typeof createClient>>
+  } else {
+    supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
   const body = await req.json()
   const { action, missingCaseId, unidentifiedCaseId, offset = 0, limit = 400, clusterId } = body
@@ -1185,14 +1198,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'missingCaseId required' }, { status: 400 })
   }
 
-  // Auth check
-  const caseIdToCheck = missingCaseId ?? ''
-  if (caseIdToCheck) {
-    const { data: roleData } = await supabase
-      .from('case_user_roles').select('role')
-      .eq('case_id', caseIdToCheck).eq('user_id', user.id).single()
-    if (!roleData || !['lead_investigator', 'admin'].includes((roleData as { role: string }).role)) {
-      return NextResponse.json({ error: 'Forbidden — lead investigator or admin only' }, { status: 403 })
+  // Auth check (skip for internal script calls)
+  if (!isInternal) {
+    const { data: { user } } = await supabase.auth.getUser()
+    const caseIdToCheck = missingCaseId ?? ''
+    if (caseIdToCheck && user) {
+      const { data: roleData } = await supabase
+        .from('case_user_roles').select('role')
+        .eq('case_id', caseIdToCheck).eq('user_id', user.id).single()
+      if (!roleData || !['lead_investigator', 'admin'].includes((roleData as { role: string }).role)) {
+        return NextResponse.json({ error: 'Forbidden — lead investigator or admin only' }, { status: 403 })
+      }
     }
   }
 
