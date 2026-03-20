@@ -80,7 +80,9 @@ interface MatchSignals {
   eyes:          SignalResult
   height:        SignalResult
   weight:        SignalResult
-  marks:         SignalResult & { keywords?: string[] }
+  tattoo:        SignalResult & { keywords?: string[] }
+  body_marks:    SignalResult & { keywords?: string[] }
+  jewelry:       SignalResult & { keywords?: string[] }
   location:      SignalResult
   childbirth:    SignalResult
   body_state?:   { state: BodyState; note: string | null; weight_applied: boolean }
@@ -275,16 +277,17 @@ const CORRIDORS: Array<{ id: string; label: string; patterns: RegExp[] }> = [
 // partial    |  30%   10%   20%     40%
 // unknown    |  80%   80%   80%     80%  (benefit of the doubt)
 
-const DECOMP_WEIGHTS: Record<BodyState, { hair: number; eyes: number; weight: number; marks: number }> = {
-  intact:   { hair: 1.0, eyes: 1.0, weight: 1.0, marks: 1.0 },
-  mild:     { hair: 0.9, eyes: 0.9, weight: 0.8, marks: 0.9 },
-  moderate: { hair: 0.5, eyes: 0.3, weight: 0.4, marks: 0.6 },
-  advanced: { hair: 0.1, eyes: 0.0, weight: 0.1, marks: 0.3 },
-  skeletal: { hair: 0.0, eyes: 0.0, weight: 0.0, marks: 0.2 },
-  burned:   { hair: 0.0, eyes: 0.0, weight: 0.0, marks: 0.1 },
-  partial:  { hair: 0.3, eyes: 0.1, weight: 0.2, marks: 0.4 },
-  unknown:  { hair: 0.8, eyes: 0.8, weight: 0.8, marks: 0.8 },
+const DECOMP_WEIGHTS: Record<BodyState, { hair: number; eyes: number; weight: number; tattoo: number; body_marks: number }> = {
+  intact:   { hair: 1.0, eyes: 1.0, weight: 1.0, tattoo: 1.0, body_marks: 1.0 },
+  mild:     { hair: 0.9, eyes: 0.9, weight: 0.8, tattoo: 0.9, body_marks: 0.9 },
+  moderate: { hair: 0.5, eyes: 0.3, weight: 0.4, tattoo: 0.5, body_marks: 0.6 },
+  advanced: { hair: 0.1, eyes: 0.0, weight: 0.1, tattoo: 0.2, body_marks: 0.3 },
+  skeletal: { hair: 0.0, eyes: 0.0, weight: 0.0, tattoo: 0.0, body_marks: 0.1 },
+  burned:   { hair: 0.0, eyes: 0.0, weight: 0.0, tattoo: 0.0, body_marks: 0.0 },
+  partial:  { hair: 0.3, eyes: 0.1, weight: 0.2, tattoo: 0.3, body_marks: 0.4 },
+  unknown:  { hair: 0.8, eyes: 0.8, weight: 0.8, tattoo: 0.8, body_marks: 0.8 },
 }
+// Jewelry NOT decomp-weighted — physical objects survive decomp better than soft tissue
 
 const DECOMP_NOTES: Record<BodyState, string | null> = {
   intact:   null,
@@ -297,8 +300,8 @@ const DECOMP_NOTES: Record<BodyState, string | null> = {
   unknown:  null,
 }
 
-const MAX_SIGNAL_SCORES = { sex: 15, race: 12, age: 15, hair: 8, eyes: 8, height: 8, weight: 5, marks: 8, location: 10, childbirth: 8 }
-const MAX_POSSIBLE_BASE = Object.values(MAX_SIGNAL_SCORES).reduce((a, b) => a + b, 0)  // 89
+const MAX_SIGNAL_SCORES = { sex: 15, race: 12, age: 15, hair: 8, eyes: 8, height: 8, weight: 5, tattoo: 15, body_marks: 8, jewelry: 10, location: 15, childbirth: 8 }
+const MAX_POSSIBLE_BASE = Object.values(MAX_SIGNAL_SCORES).reduce((a, b) => a + b, 0)
 
 // ─── Scorers ──────────────────────────────────────────────────────────────────
 
@@ -513,35 +516,72 @@ function scoreWeight(a: ParsedCase, b: ParsedCase): SignalResult {
   return { score: 0, match: 'no_match' }
 }
 
-function scoreMarks(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: string[]; detail?: string } {
-  // Combine distinguishing marks + clothing + jewelry for matching
-  // These are all physical/material identifiers present on or with the person
-  const fullA = [a.marks, a.clothing, a.jewelry].filter(Boolean).join(' ')
-  const fullB = [b.marks, b.clothing, b.jewelry].filter(Boolean).join(' ')
-  if (!fullA && !fullB) return { score: 0, match: 'none_mentioned', keywords: [] }
-  const norm = (s: string) => s.toLowerCase()
-  const kA = MARK_KEYWORDS.filter(k => norm(fullA).includes(k))
-  const kB = MARK_KEYWORDS.filter(k => norm(fullB).includes(k))
-  if (kA.length === 0 && kB.length === 0) return { score: 0, match: 'none_mentioned', keywords: [] }
-  const shared = kA.filter(k => kB.includes(k))
-  if (shared.length === 0) {
-    if (kA.length > 0 && kB.length > 0) return { score: 2, match: 'both_have_marks', keywords: [] }
-    return { score: 0, match: 'one_side_only', keywords: [] }
+// Tattoo imagery — only scored when both sides mention "tattoo"
+const TATTOO_IMAGERY = [
+  'eagle','cross','rose','dragon','skull','snake','heart','star','butterfly','anchor',
+  'tribal','angel','devil','wing','sword','knife','gun','flower','tiger','wolf',
+  'bear','lion','phoenix','moon','sun','portrait','flag','military',
+]
+
+// Body marks — physical identifiers that survive longer than soft tissue
+const BODY_MARK_KW = [
+  'scar','birthmark','piercing','mole','brand','amputation','prosthetic','implant',
+  'surgical','surgery','deformity','missing finger','missing tooth','gold tooth',
+]
+
+// Jewelry compound token scoring
+const JEWELRY_ITEMS = ['locket','pendant','medallion','brooch','bracelet','necklace','earring','anklet','choker','bangle','ring','chain','watch']
+const JEWELRY_ADJ   = ['heart','cross','diamond','gold','silver','engraved','monogram','pearl','wedding','engagement','initial','rope','link']
+function buildJewelryTokens(text: string): Set<string> {
+  const tokens = new Set<string>()
+  for (const item of JEWELRY_ITEMS) {
+    if (!text.includes(item)) continue
+    tokens.add(item)
+    for (const adj of JEWELRY_ADJ) {
+      if (text.includes(adj)) tokens.add(`${adj}_${item}`)
+    }
   }
-  // Build detail note about forensic availability
-  const forensicNotes: string[] = []
-  if (a.dental && a.dental.toLowerCase().includes('available')) forensicNotes.push('Missing: dentals available')
-  if (b.dental && b.dental.toLowerCase().includes('available')) forensicNotes.push('Unidentified: dentals available')
-  if (a.dna && !/not available/i.test(a.dna)) forensicNotes.push('Missing: DNA on file')
-  if (b.dna && !/not available/i.test(b.dna)) forensicNotes.push('Unidentified: DNA on file')
-  if (a.fingerprints && a.fingerprints.toLowerCase().includes('available')) forensicNotes.push('Missing: prints available')
-  if (b.fingerprints && b.fingerprints.toLowerCase().includes('available')) forensicNotes.push('Unidentified: prints available')
-  return {
-    score: Math.min(8, shared.length * 3),
-    match: shared.length >= 3 ? 'strong_overlap' : 'partial_overlap',
-    keywords: shared,
-    detail: forensicNotes.length ? forensicNotes.join('; ') : undefined,
-  }
+  return tokens
+}
+
+function scoreTattoos(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: string[] } {
+  const mText = (a.marks ?? '').toLowerCase()
+  const uText = (b.marks ?? '').toLowerCase()
+  const mMotifs = mText.includes('tattoo') ? TATTOO_IMAGERY.filter(t => mText.includes(t)) : []
+  const uMotifs = uText.includes('tattoo') ? TATTOO_IMAGERY.filter(t => uText.includes(t)) : []
+  const shared = mMotifs.filter(t => uMotifs.includes(t))
+  const score = shared.length >= 3 ? 15 : shared.length >= 2 ? 10 : shared.length >= 1 ? 5 : 0
+  const match = shared.length >= 3 ? 'strong_match' : shared.length >= 2 ? 'partial_match' : shared.length >= 1 ? 'possible_match'
+    : mMotifs.length > 0 && uMotifs.length > 0 ? 'both_have_tattoos'
+    : !mText.includes('tattoo') && !uText.includes('tattoo') ? 'none_mentioned' : 'one_side_only'
+  return { score, match, keywords: shared }
+}
+
+function scoreBodyMarks(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: string[] } {
+  const mText = (a.marks ?? '').toLowerCase()
+  const uText = (b.marks ?? '').toLowerCase()
+  const mMarks = BODY_MARK_KW.filter(k => mText.includes(k))
+  const uMarks = BODY_MARK_KW.filter(k => uText.includes(k))
+  const shared = mMarks.filter(k => uMarks.includes(k))
+  const score = shared.length > 0 ? Math.min(8, shared.length * 4) : 0
+  const match = shared.length > 0 ? 'shared' : mMarks.length > 0 && uMarks.length > 0 ? 'both_have_marks' : 'none_mentioned'
+  return { score, match, keywords: shared }
+}
+
+function scoreJewelry(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: string[] } {
+  const mText = (a.jewelry ?? '').toLowerCase()
+  const uText = (b.jewelry ?? '').toLowerCase()
+  if (!mText && !uText) return { score: 0, match: 'none_mentioned', keywords: [] }
+  const mTokens = buildJewelryTokens(mText)
+  const uTokens = buildJewelryTokens(uText)
+  const sharedCompound = [...mTokens].filter(t => t.includes('_') && uTokens.has(t))
+  const sharedGeneric  = [...mTokens].filter(t => !t.includes('_') && uTokens.has(t))
+  const score = sharedCompound.length > 0 ? Math.min(10, sharedCompound.length * 8)
+    : sharedGeneric.length > 0 ? Math.min(6, sharedGeneric.length * 3) : 0
+  const match = sharedCompound.length > 0 ? 'specific_match'
+    : sharedGeneric.length > 0 ? 'generic_match'
+    : mTokens.size > 0 && uTokens.size > 0 ? 'both_have_jewelry' : 'none_mentioned'
+  return { score, match, keywords: [...sharedCompound, ...sharedGeneric] }
 }
 
 // Words that are too generic to constitute a "unique identifier" — body positions,
@@ -563,7 +603,8 @@ const SIDE_WORDS = ['left','right','upper','lower','inner','outer']
 // a heart tattoo on the left shoulder vs a partial tattoo on the left shoulder
 // both produce the same location compound, triggering a strong identifier match.
 function extractContentWords(p: ParsedCase): Set<string> {
-  const text = [p.marks, p.clothing, p.jewelry].filter(Boolean).join(' ').toLowerCase()
+  // Marks only — clothing and jewelry are scored separately
+  const text = (p.marks ?? '').toLowerCase()
   if (!text) return new Set()
 
   const words = new Set(
@@ -657,9 +698,9 @@ function forensicAvailabilityNote(a: ParsedCase, b: ParsedCase): string | null {
 function scoreLocation(a: ParsedCase, b: ParsedCase): SignalResult {
   const sa = a.state, sb = b.state
   if (!sa || !sb) return { score: 0, match: 'unknown' }
-  if (sa === sb) return { score: 10, match: 'same_state', detail: sa }
+  if (sa === sb) return { score: 15, match: 'same_state', detail: sa }
   if (STATE_ADJACENT[sa]?.includes(sb) || STATE_ADJACENT[sb]?.includes(sa)) return { score: 5, match: 'adjacent_state', detail: `${sa}↔${sb}` }
-  return { score: 0, match: 'different_state' }
+  return { score: -5, match: 'different_state' }
 }
 
 // Childbirth / parity status — forensic bone analysis can detect signs of childbirth,
@@ -685,9 +726,13 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   eliminated: boolean
   eliminationReason?: string
 } {
-  // Chronological impossibility — dates are objective, no override possible.
-  if (missing.year && unidentified.year && unidentified.year < missing.year - 1) {
-    return { signals: { sex: { score: 0, match: 'n/a' }, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'chronologically_impossible' }
+  // Chronological impossibility — remains found before person went missing
+  const chronoImpossible = missing.year && unidentified.year && (
+    unidentified.year < missing.year ||
+    (unidentified.year === missing.year && missing.month && unidentified.month && unidentified.month < missing.month)
+  )
+  if (chronoImpossible) {
+    return { signals: { sex: { score: 0, match: 'n/a' }, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, tattoo: { score: 0, match: 'n/a', keywords: [] }, body_marks: { score: 0, match: 'n/a', keywords: [] }, jewelry: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'chronologically_impossible' }
   }
 
   // Cheap sex + age checks first — scoreUniqueIdentifier only runs on surviving pairs
@@ -698,10 +743,10 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
     // Only worth calling scoreUniqueIdentifier if there's a potential elimination to override
     const uniqueId = scoreUniqueIdentifier(missing, unidentified)
     if (sexSig.score < -100 && !uniqueId.overridesElimination) {
-      return { signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'sex_mismatch' }
+      return { signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: { score: 0, match: 'n/a' }, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, tattoo: { score: 0, match: 'n/a', keywords: [] }, body_marks: { score: 0, match: 'n/a', keywords: [] }, jewelry: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'sex_mismatch' }
     }
     if (ageSig.score < -5 && !uniqueId.overridesElimination) {
-      return { signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: ageSig, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, marks: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'age_incompatible' }
+      return { signals: { sex: sexSig, race: { score: 0, match: 'n/a' }, age: ageSig, hair: { score: 0, match: 'n/a' }, eyes: { score: 0, match: 'n/a' }, height: { score: 0, match: 'n/a' }, weight: { score: 0, match: 'n/a' }, tattoo: { score: 0, match: 'n/a', keywords: [] }, body_marks: { score: 0, match: 'n/a', keywords: [] }, jewelry: { score: 0, match: 'n/a', keywords: [] }, location: { score: 0, match: 'n/a' }, childbirth: { score: 0, match: 'n/a' } }, composite: 0, grade: 'weak', eliminated: true, eliminationReason: 'age_incompatible' }
     }
   }
 
@@ -716,7 +761,9 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
     eyes:       scoreEyes(missing, unidentified),
     height:     scoreHeight(missing, unidentified),
     weight:     scoreWeight(missing, unidentified),
-    marks:      scoreMarks(missing, unidentified),
+    tattoo:     scoreTattoos(missing, unidentified),
+    body_marks: scoreBodyMarks(missing, unidentified),
+    jewelry:    scoreJewelry(missing, unidentified),
     location:   scoreLocation(missing, unidentified),
     childbirth: scoreChildbirth(missing, unidentified),
   }
@@ -728,10 +775,12 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
 
   const signals: MatchSignals = {
     ...rawSignals,
-    hair:   { ...rawSignals.hair,   score: Math.round(rawSignals.hair.score   * w.hair)   },
-    eyes:   { ...rawSignals.eyes,   score: Math.round(rawSignals.eyes.score   * w.eyes)   },
-    weight: { ...rawSignals.weight, score: Math.round(rawSignals.weight.score * w.weight) },
-    marks:  { ...rawSignals.marks,  score: Math.round(rawSignals.marks.score  * w.marks)  },
+    hair:       { ...rawSignals.hair,       score: Math.round(rawSignals.hair.score       * w.hair)       },
+    eyes:       { ...rawSignals.eyes,       score: Math.round(rawSignals.eyes.score       * w.eyes)       },
+    weight:     { ...rawSignals.weight,     score: Math.round(rawSignals.weight.score     * w.weight)     },
+    tattoo:     { ...rawSignals.tattoo,     score: Math.round(rawSignals.tattoo.score     * w.tattoo)     },
+    body_marks: { ...rawSignals.body_marks, score: Math.round(rawSignals.body_marks.score * w.body_marks) },
+    // jewelry is NOT decomp-weighted — physical objects survive decomp better than soft tissue
     body_state: {
       state: bodyState,
       note: decompNote,
@@ -741,10 +790,11 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
 
   // Recalculate max possible accounting for zeroed signals
   const deductedMax =
-    (1 - w.hair)   * MAX_SIGNAL_SCORES.hair   +
-    (1 - w.eyes)   * MAX_SIGNAL_SCORES.eyes   +
-    (1 - w.weight) * MAX_SIGNAL_SCORES.weight +
-    (1 - w.marks)  * MAX_SIGNAL_SCORES.marks
+    (1 - w.hair)       * MAX_SIGNAL_SCORES.hair       +
+    (1 - w.eyes)       * MAX_SIGNAL_SCORES.eyes       +
+    (1 - w.weight)     * MAX_SIGNAL_SCORES.weight     +
+    (1 - w.tattoo)     * MAX_SIGNAL_SCORES.tattoo     +
+    (1 - w.body_marks) * MAX_SIGNAL_SCORES.body_marks
   const adjustedMax = Math.max(30, MAX_POSSIBLE_BASE - Math.round(deductedMax))
 
   // Inject unique identifier signal — added separately because it can change grade

@@ -116,18 +116,19 @@ function parseSubmission(sub: RawSub): ParsedCase {
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
 
-const DECOMP_WEIGHTS: Record<BodyState, { hair: number; eyes: number; weight: number; marks: number }> = {
-  intact:  { hair:1.0, eyes:1.0, weight:1.0, marks:1.0 },
-  mild:    { hair:0.9, eyes:0.9, weight:0.8, marks:0.9 },
-  moderate:{ hair:0.5, eyes:0.3, weight:0.4, marks:0.6 },
-  advanced:{ hair:0.1, eyes:0.0, weight:0.1, marks:0.3 },
-  skeletal:{ hair:0.0, eyes:0.0, weight:0.0, marks:0.2 },
-  burned:  { hair:0.0, eyes:0.0, weight:0.0, marks:0.1 },
-  partial: { hair:0.3, eyes:0.1, weight:0.2, marks:0.4 },
-  unknown: { hair:0.8, eyes:0.8, weight:0.8, marks:0.8 },
+const DECOMP_WEIGHTS: Record<BodyState, { hair: number; eyes: number; weight: number; tattoo: number; body_marks: number }> = {
+  intact:  { hair:1.0, eyes:1.0, weight:1.0, tattoo:1.0, body_marks:1.0 },
+  mild:    { hair:0.9, eyes:0.9, weight:0.8, tattoo:0.9, body_marks:0.9 },
+  moderate:{ hair:0.5, eyes:0.3, weight:0.4, tattoo:0.5, body_marks:0.6 },
+  advanced:{ hair:0.1, eyes:0.0, weight:0.1, tattoo:0.2, body_marks:0.3 },
+  skeletal:{ hair:0.0, eyes:0.0, weight:0.0, tattoo:0.0, body_marks:0.1 },
+  burned:  { hair:0.0, eyes:0.0, weight:0.0, tattoo:0.0, body_marks:0.0 },
+  partial: { hair:0.3, eyes:0.1, weight:0.2, tattoo:0.3, body_marks:0.4 },
+  unknown: { hair:0.8, eyes:0.8, weight:0.8, tattoo:0.8, body_marks:0.8 },
 }
-const MAX_SCORES = { sex:15, race:12, age:15, hair:8, eyes:8, height:8, weight:5, marks:8, location:10, childbirth:8 }
-const MAX_BASE = Object.values(MAX_SCORES).reduce((a,b) => a+b, 0) // 89
+// Jewelry NOT decomp-weighted — physical objects survive decomp better than soft tissue
+const MAX_SCORES = { sex:15, race:12, age:15, hair:8, eyes:8, height:8, weight:5, tattoo:15, body_marks:8, jewelry:10, location:15, childbirth:8 }
+const MAX_BASE = Object.values(MAX_SCORES).reduce((a,b) => a+b, 0)
 
 const RACE_GROUPS: Record<string, string[]> = {
   white:   ['white','caucasian','european'],
@@ -159,20 +160,20 @@ const STATE_ADJ: Record<string, string[]> = {
   NY:['NJ','CT','MA','VT','PA'], PA:['NY','NJ','DE','MD','WV','OH'],
   WA:['OR','ID'], OR:['WA','ID','NV','CA'],
 }
+// Located-mark compound token system — only from marks field, not clothing or jewelry
 const MARK_TYPES = ['tattoo','scar','birthmark','brand','piercing','mark','mole']
 const BODY_LOCS  = ['shoulder','arm','wrist','forearm','chest','back','neck','leg','thigh','ankle','face','hand','abdomen','torso','rib','hip','calf','forehead','scalp','ear']
 const SIDE_WORDS = ['left','right','upper','lower','inner','outer']
 const GENERIC_ID_WORDS = new Set([
   'tattoo','scar','mark','left','right','upper','lower','inner','outer','small','large',
   'arm','leg','chest','back','neck','hand','shoulder','wrist','ankle','face','forehead',
-  'abdomen','torso','skin','body','shirt','pants','jeans','shoes','jacket','coat',
-  'clothing','worn','wearing','unknown','available','not',
+  'abdomen','torso','skin','body','unknown','available','not',
 ])
 function extractContentWords(p: ParsedCase): Set<string> {
-  const text = [p.marks, p.clothing, p.jewelry].filter(Boolean).join(' ').toLowerCase()
+  // Marks only — clothing and jewelry are scored separately
+  const text = (p.marks ?? '').toLowerCase()
   if (!text) return new Set()
   const words = new Set(text.replace(/[^\w\s]/g,' ').split(/\s+/).filter(w => w.length >= 4 && !GENERIC_ID_WORDS.has(w) && !/^\d+$/.test(w)))
-  // Synthesize located-mark compound tokens so "left shoulder tattoo" matches across records
   for (const loc of BODY_LOCS) {
     if (!text.includes(loc)) continue
     for (const type of MARK_TYPES) {
@@ -185,6 +186,34 @@ function extractContentWords(p: ParsedCase): Set<string> {
   }
   return words
 }
+
+// Tattoo imagery — only scored when both sides mention tattoo
+const TATTOO_IMAGERY = [
+  'eagle','cross','rose','dragon','skull','snake','heart','star','butterfly','anchor',
+  'tribal','angel','devil','wing','sword','knife','gun','flower','tiger','wolf',
+  'bear','lion','phoenix','moon','sun','portrait','flag','military',
+]
+
+// Body marks — physical identifiers that survive longer than soft tissue
+const BODY_MARK_KW = [
+  'scar','birthmark','piercing','mole','brand','amputation','prosthetic','implant',
+  'surgical','surgery','deformity','missing finger','missing tooth','gold tooth',
+]
+
+// Jewelry — specific pieces are strong identifiers; compound tokens for described items
+const JEWELRY_ITEMS = ['locket','pendant','medallion','brooch','bracelet','necklace','earring','anklet','choker','bangle','ring','chain','watch']
+const JEWELRY_ADJ   = ['heart','cross','diamond','gold','silver','engraved','monogram','pearl','wedding','engagement','initial','rope','link']
+function jewelryTokens(text: string): Set<string> {
+  const tokens = new Set<string>()
+  for (const item of JEWELRY_ITEMS) {
+    if (!text.includes(item)) continue
+    tokens.add(item)
+    for (const adj of JEWELRY_ADJ) {
+      if (text.includes(adj)) tokens.add(`${adj}_${item}`)
+    }
+  }
+  return tokens
+}
 function scoreUniqueId(a: ParsedCase, b: ParsedCase) {
   const wA = extractContentWords(a), wB = extractContentWords(b)
   if (!wA.size || !wB.size) return { score: 0, shared: [] as string[], overrides: false, detail: null as string|null }
@@ -195,23 +224,6 @@ function scoreUniqueId(a: ParsedCase, b: ParsedCase) {
   return { score: 0, shared: [] as string[], overrides: false, detail: null as string|null }
 }
 
-const MARK_KW = [
-  'tattoo','scar','birthmark','piercing','mole','brand','amputation','prosthetic','implant',
-  'surgical','surgery','deformity','missing finger','missing tooth','gold tooth',
-  'arm','leg','chest','back','neck','hand','shoulder','wrist','ankle','face','forehead','abdomen','torso',
-  'eagle','cross','rose','dragon','skull','snake','heart','star','butterfly','anchor',
-  'tribal','flag','military','name','initial','letter','number','portrait','angel','devil',
-  'wing','sword','knife','gun','flower','tiger','wolf','bear','lion','phoenix','moon','sun',
-  'left','right','upper','lower','inner','outer',
-  'jeans','pants','shorts','shirt','sweater','jacket','coat','dress','skirt','hoodie','vest',
-  'sneakers','boots','shoes','heels','sandals','slippers','loafers',
-  'nike','adidas','converse','vans','jordan','reebok','puma','levis','wrangler',
-  'torn','ripped','faded','striped','plaid','denim','flannel','polo','camouflage','camo','size',
-  'necklace','bracelet','ring','earring','watch','chain','locket','pendant','medallion',
-  'choker','bangle','anklet','brooch',
-  'gold','silver','diamond','engraved','inscription','initials','monogram',
-  'red','blue','green','black','white','gray','grey','brown','pink','purple','yellow','orange','maroon','navy',
-]
 
 function normRace(r: string | null): string | null {
   if (!r) return null; const l = r.toLowerCase()
@@ -236,8 +248,12 @@ function parseAgeRange(s: string | null): [number,number] | null {
 function scoreMatch(m: ParsedCase, u: ParsedCase) {
   // Fast-path eliminations BEFORE expensive unique identifier scoring (~70% of pairs exit here)
 
-  // Chronological impossibility — no override possible
-  if (m.year && u.year && u.year < m.year - 1) return { eliminated: true, reason: 'chronologically_impossible', composite: 0, grade: 'weak', signals: {} }
+  // Chronological impossibility — remains found before person went missing
+  if (m.year && u.year) {
+    if (u.year < m.year) return { eliminated: true, reason: 'chronologically_impossible', composite: 0, grade: 'weak', signals: {} }
+    if (u.year === m.year && m.month && u.month && u.month < m.month)
+      return { eliminated: true, reason: 'chronologically_impossible', composite: 0, grade: 'weak', signals: {} }
+  }
 
   // Quick sex check
   const sa = normSex(m.sex), sb = normSex(u.sex)
@@ -306,29 +322,46 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
   const wa = toLbs(m.weight), wb = toLbs(u.weight)
   const weightRaw = !wa || !wb ? 0 : Math.abs(wa-wb) <= 10 ? 5 : Math.abs(wa-wb) <= 20 ? 3 : Math.abs(wa-wb) <= 30 ? 1 : 0
 
-  // Marks — combine distinguishing marks + clothing + jewelry
-  const norm = (s: string | null) => (s??'').toLowerCase()
-  const fullA = [m.marks, m.clothing, m.jewelry].filter(Boolean).join(' ')
-  const fullB = [u.marks, u.clothing, u.jewelry].filter(Boolean).join(' ')
-  const kA = MARK_KW.filter(k => norm(fullA).includes(k))
-  const kB = MARK_KW.filter(k => norm(fullB).includes(k))
-  const shared = kA.filter(k => kB.includes(k))
-  const marksRaw = shared.length > 0 ? Math.min(8, shared.length*3) : kA.length>0&&kB.length>0 ? 2 : 0
+  // Tattoo imagery — only when both sides mention tattoo
+  const mMarksText = (m.marks ?? '').toLowerCase()
+  const uMarksText = (u.marks ?? '').toLowerCase()
+  const mTattooMotifs = mMarksText.includes('tattoo') ? TATTOO_IMAGERY.filter(t => mMarksText.includes(t)) : []
+  const uTattooMotifs = uMarksText.includes('tattoo') ? TATTOO_IMAGERY.filter(t => uMarksText.includes(t)) : []
+  const sharedMotifs = mTattooMotifs.filter(t => uTattooMotifs.includes(t))
+  const tattooRaw = sharedMotifs.length >= 3 ? 15 : sharedMotifs.length >= 2 ? 10 : sharedMotifs.length >= 1 ? 5 : 0
 
-  // Location — bidirectional adjacency check
-  const locationScore = !m.state || !u.state ? 0 : m.state===u.state ? 10 :
-    (STATE_ADJ[m.state]?.includes(u.state) || STATE_ADJ[u.state]?.includes(m.state)) ? 5 : 0
+  // Body marks — scars, birthmarks, amputations, implants
+  const mBodyMarks = BODY_MARK_KW.filter(k => mMarksText.includes(k))
+  const uBodyMarks = BODY_MARK_KW.filter(k => uMarksText.includes(k))
+  const sharedBodyMarks = mBodyMarks.filter(k => uBodyMarks.includes(k))
+  const bodyMarksRaw = sharedBodyMarks.length > 0 ? Math.min(8, sharedBodyMarks.length * 4) : 0
+
+  // Jewelry — physical objects, not decomp-weighted
+  const mJewelText = (m.jewelry ?? '').toLowerCase()
+  const uJewelText = (u.jewelry ?? '').toLowerCase()
+  const mJewelTokens = jewelryTokens(mJewelText)
+  const uJewelTokens = jewelryTokens(uJewelText)
+  const sharedCompoundJewel = [...mJewelTokens].filter(t => t.includes('_') && uJewelTokens.has(t))
+  const sharedGenericJewel  = [...mJewelTokens].filter(t => !t.includes('_') && uJewelTokens.has(t))
+  const jewelryScore = sharedCompoundJewel.length > 0 ? Math.min(10, sharedCompoundJewel.length * 8)
+    : sharedGenericJewel.length > 0 ? Math.min(6, sharedGenericJewel.length * 3) : 0
+
+  // Location — same state +15, adjacent +5, known different -5, unknown 0
+  const locationScore = !m.state || !u.state ? 0 : m.state===u.state ? 15 :
+    (STATE_ADJ[m.state]?.includes(u.state) || STATE_ADJ[u.state]?.includes(m.state)) ? 5 : -5
 
   // Apply decomp weights
   const w = DECOMP_WEIGHTS[u.bodyState]
-  const hair   = Math.round(hairRaw   * w.hair)
-  const eyes   = Math.round(eyesRaw   * w.eyes)
-  const weight = Math.round(weightRaw * w.weight)
-  const marks  = Math.round(marksRaw  * w.marks)
+  const hair      = Math.round(hairRaw      * w.hair)
+  const eyes      = Math.round(eyesRaw      * w.eyes)
+  const weight    = Math.round(weightRaw    * w.weight)
+  const tattoo    = Math.round(tattooRaw    * w.tattoo)
+  const bodyMarks = Math.round(bodyMarksRaw * w.body_marks)
 
   const deductedMax =
     (1-w.hair)*MAX_SCORES.hair + (1-w.eyes)*MAX_SCORES.eyes +
-    (1-w.weight)*MAX_SCORES.weight + (1-w.marks)*MAX_SCORES.marks
+    (1-w.weight)*MAX_SCORES.weight + (1-w.tattoo)*MAX_SCORES.tattoo +
+    (1-w.body_marks)*MAX_SCORES.body_marks
   const adjustedMax = Math.max(30, MAX_BASE - Math.round(deductedMax))
 
   // Childbirth / parity — forensic bone analysis or stated history
@@ -337,20 +370,22 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
     : ca === cb ? (ca === 'evidence' ? 8 : 5)
     : -20
 
-  const rawScore = sexScore + raceScore + ageScore + hair + eyes + heightScore + weight + marks + locationScore + childbirthScore
+  const rawScore = sexScore + raceScore + ageScore + hair + eyes + heightScore + weight + tattoo + bodyMarks + jewelryScore + locationScore + childbirthScore
   const composite = Math.round(Math.max(0, Math.min(100, ((rawScore + fullUniqueId.score) / adjustedMax) * 100)))
   const grade = composite >= 73 ? 'very_strong' : composite >= 56 ? 'strong' : composite >= 39 ? 'notable' : composite >= 22 ? 'moderate' : 'weak'
 
   const signals: Record<string, unknown> = {
-    sex:      { score: sexScore,    match: !sa||!sb ? 'unknown' : sa===sb ? 'exact' : 'mismatch' },
-    race:     { score: raceScore,   match: !ra&&!rb ? 'both_unknown' : !ra||!rb ? 'unknown' : ra===rb ? 'exact' : raceScore===6 ? 'partial' : 'mismatch' },
-    age:      { score: ageScore,    match: ageScore===15?'very_close':ageScore===10?'close':ageScore===5?'possible':ageScore===0?'distant':ageScore===-10?'incompatible':'unknown', detail: ageDet },
-    hair:     { score: hair,        match: !ha||!hb ? 'unknown' : hairRaw===8 ? 'exact' : hairRaw===3 ? 'adjacent' : 'no_match' },
-    eyes:     { score: eyes,        match: !ea||!eb ? 'unknown' : eyesRaw===8 ? 'exact' : eyesRaw===3 ? 'adjacent' : 'no_match' },
-    height:   { score: heightScore, match: heightScore===8?'exact':heightScore===6?'very_close':heightScore===4?'close':heightScore===2?'possible':!ia||!ib?'unknown':'no_match' },
-    weight:   { score: weight,      match: weightRaw===5?'exact':weightRaw===3?'close':weightRaw===1?'possible':!wa||!wb?'unknown':'no_match' },
-    marks:    { score: marks,       match: shared.length>=3?'strong_overlap':shared.length>0?'partial_overlap':kA.length>0&&kB.length>0?'both_have_marks':!m.marks&&!u.marks?'none_mentioned':'one_side_only', keywords: shared },
-    location:   { score: locationScore,   match: !m.state||!u.state?'unknown':m.state===u.state?'same_state':locationScore===5?'adjacent_state':'different_state' },
+    sex:        { score: sexScore,      match: !sa||!sb ? 'unknown' : sa===sb ? 'exact' : 'mismatch' },
+    race:       { score: raceScore,     match: !ra&&!rb ? 'both_unknown' : !ra||!rb ? 'unknown' : ra===rb ? 'exact' : raceScore===6 ? 'partial' : 'mismatch' },
+    age:        { score: ageScore,      match: ageScore===15?'very_close':ageScore===10?'close':ageScore===5?'possible':ageScore===0?'distant':ageScore===-10?'incompatible':'unknown', detail: ageDet },
+    hair:       { score: hair,          match: !ha||!hb ? 'unknown' : hairRaw===8 ? 'exact' : hairRaw===3 ? 'adjacent' : 'no_match' },
+    eyes:       { score: eyes,          match: !ea||!eb ? 'unknown' : eyesRaw===8 ? 'exact' : eyesRaw===3 ? 'adjacent' : 'no_match' },
+    height:     { score: heightScore,   match: heightScore===8?'exact':heightScore===6?'very_close':heightScore===4?'close':heightScore===2?'possible':!ia||!ib?'unknown':'no_match' },
+    weight:     { score: weight,        match: weightRaw===5?'exact':weightRaw===3?'close':weightRaw===1?'possible':!wa||!wb?'unknown':'no_match' },
+    tattoo:     { score: tattoo,        match: sharedMotifs.length>=3?'strong_match':sharedMotifs.length>=2?'partial_match':sharedMotifs.length>=1?'possible_match':mTattooMotifs.length>0&&uTattooMotifs.length>0?'both_have_tattoos':!mMarksText.includes('tattoo')&&!uMarksText.includes('tattoo')?'none_mentioned':'one_side_only', keywords: sharedMotifs },
+    body_marks: { score: bodyMarks,     match: sharedBodyMarks.length>0?'shared':mBodyMarks.length>0&&uBodyMarks.length>0?'both_have_marks':'none_mentioned', keywords: sharedBodyMarks },
+    jewelry:    { score: jewelryScore,  match: sharedCompoundJewel.length>0?'specific_match':sharedGenericJewel.length>0?'generic_match':mJewelTokens.size>0&&uJewelTokens.size>0?'both_have_jewelry':'none_mentioned', keywords: [...sharedCompoundJewel, ...sharedGenericJewel] },
+    location:   { score: locationScore, match: !m.state||!u.state?'unknown':m.state===u.state?'same_state':locationScore===5?'adjacent_state':'different_state' },
     childbirth: { score: childbirthScore, match: (ca==='unknown'||cb==='unknown')?'unknown':ca===cb?(ca==='evidence'?'both_parous':'both_nulliparous'):'mismatch' },
     body_state: { state: u.bodyState, note: null, weight_applied: u.bodyState !== 'intact' && u.bodyState !== 'unknown' },
   }
@@ -380,8 +415,10 @@ function scoreMatch(m: ParsedCase, u: ParsedCase) {
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const resume = process.argv.includes('--resume')
   console.log('\nDoe Network Cross-Match Runner')
   console.log('==============================')
+  if (resume) console.log('Mode: RESUME (skipping deletion, skipping already-scored pairs)')
 
   // Find cases by title
   const { data: cases } = await supabase
@@ -406,27 +443,31 @@ async function main() {
   console.log(`\nMissing:      ${missingCase.id}`)
   unidentifiedCases.forEach(c => console.log(`Unidentified: ${c.id}  (${c.title})`))
 
-  // Delete all existing unreviewed match candidates for a clean rescore
-  console.log('\nClearing unreviewed match candidates…')
-  let deletedTotal = 0
-  while (true) {
-    const { data: ids } = await supabase
-      .from('doe_match_candidates')
-      .select('id')
-      .eq('missing_case_id', missingCase.id)
-      .eq('reviewer_status', 'unreviewed')
-      .limit(500)
-    if (!ids?.length) break
-    const { error } = await supabase
-      .from('doe_match_candidates')
-      .delete()
-      .in('id', ids.map((r: { id: string }) => r.id))
-    if (error) { console.error(`  Delete error: ${error.message}`); break }
-    deletedTotal += ids.length
-    process.stdout.write(`\r  Deleted ${deletedTotal} unreviewed candidates…`)
-    if (ids.length < 500) break
+  if (resume) {
+    console.log('\nResume mode — keeping existing candidates, will skip already-scored pairs.')
+  } else {
+    // Delete all existing unreviewed match candidates for a clean rescore
+    console.log('\nClearing unreviewed match candidates…')
+    let deletedTotal = 0
+    while (true) {
+      const { data: ids } = await supabase
+        .from('doe_match_candidates')
+        .select('id')
+        .eq('missing_case_id', missingCase.id)
+        .eq('reviewer_status', 'unreviewed')
+        .limit(500)
+      if (!ids?.length) break
+      const { error } = await supabase
+        .from('doe_match_candidates')
+        .delete()
+        .in('id', ids.map((r: { id: string }) => r.id))
+      if (error) { console.error(`  Delete error: ${error.message}`); break }
+      deletedTotal += ids.length
+      process.stdout.write(`\r  Deleted ${deletedTotal} unreviewed candidates…`)
+      if (ids.length < 500) break
+    }
+    console.log(`\r  Deleted ${deletedTotal} unreviewed candidates. Human-reviewed pairs preserved.`)
   }
-  console.log(`\r  Deleted ${deletedTotal} unreviewed candidates. Human-reviewed pairs preserved.`)
 
   // Load ALL unidentified remains from ALL unidentified cases
   console.log('\nLoading unidentified remains…')
@@ -466,34 +507,54 @@ async function main() {
     const missing = (missingRaw ?? []).map(s => parseSubmission(s as RawSub))
     if (!missing.length) break
 
+    // In resume mode, skip pairs already in the DB
+    let existingPairs = new Set<string>()
+    if (resume) {
+      const missingIds = missing.map(p => p.submissionId)
+      const { data: existing } = await supabase
+        .from('doe_match_candidates')
+        .select('missing_submission_id, unidentified_submission_id')
+        .in('missing_submission_id', missingIds) as { data: Array<{ missing_submission_id: string; unidentified_submission_id: string }> | null }
+      existingPairs = new Set((existing ?? []).map(e => `${e.missing_submission_id}__${e.unidentified_submission_id}`))
+    }
+
     const toInsert: object[] = []
     let eliminated = 0
 
     for (const m of missing) {
+      const mCandidates: Array<{ composite: number; row: object }> = []
       for (const u of unidentified) {
+        if (resume && existingPairs.has(`${m.submissionId}__${u.submissionId}`)) continue
         const r = scoreMatch(m, u)
         if (r.eliminated) { eliminated++; continue }
-        if (r.composite < 39) continue  // notable+ only — moderate/weak not stored
-        toInsert.push({
-          missing_submission_id:      m.submissionId,
-          unidentified_submission_id: u.submissionId,
-          missing_case_id:            missingCase.id,
-          unidentified_case_id:       u.caseId ?? unidentifiedCases[0].id,
-          composite_score:            r.composite,
-          grade:                      r.grade,
-          signals:                    r.signals,
-          missing_doe_id:             m.doeId,  missing_name:     m.name,
-          missing_sex:                m.sex,    missing_race:     m.race,
-          missing_age:                m.age,    missing_location: m.location,
-          missing_date:               m.date,   missing_hair:     m.hair,
-          missing_eyes:               m.eyes,   missing_marks:    m.marks,
-          unidentified_doe_id:        u.doeId,  unidentified_sex:      u.sex,
-          unidentified_race:          u.race,   unidentified_age:      u.age,
-          unidentified_location:      u.location, unidentified_date:   u.date,
-          unidentified_hair:          u.hair,   unidentified_eyes:     u.eyes,
-          unidentified_marks:         u.marks,
+        if (r.composite < 73) continue  // very_strong only
+        mCandidates.push({
+          composite: r.composite,
+          row: {
+            missing_submission_id:      m.submissionId,
+            unidentified_submission_id: u.submissionId,
+            missing_case_id:            missingCase.id,
+            unidentified_case_id:       u.caseId ?? unidentifiedCases[0].id,
+            composite_score:            r.composite,
+            grade:                      r.grade,
+            signals:                    r.signals,
+            missing_doe_id:             m.doeId,  missing_name:     m.name,
+            missing_sex:                m.sex,    missing_race:     m.race,
+            missing_age:                m.age,    missing_location: m.location,
+            missing_date:               m.date,   missing_hair:     m.hair,
+            missing_eyes:               m.eyes,   missing_marks:    m.marks,
+            unidentified_doe_id:        u.doeId,  unidentified_sex:      u.sex,
+            unidentified_race:          u.race,   unidentified_age:      u.age,
+            unidentified_location:      u.location, unidentified_date:   u.date,
+            unidentified_hair:          u.hair,   unidentified_eyes:     u.eyes,
+            unidentified_marks:         u.marks,  unidentified_jewelry:  u.jewelry,
+            missing_jewelry:            m.jewelry,
+          },
         })
       }
+      // Keep only top 10 per missing person, sorted by score descending
+      mCandidates.sort((a, b) => b.composite - a.composite)
+      for (const c of mCandidates.slice(0, 10)) toInsert.push(c.row)
     }
 
     // Upsert in sub-batches of 100

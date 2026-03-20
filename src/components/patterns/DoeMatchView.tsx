@@ -46,6 +46,7 @@ interface DoeMatchCandidate {
   missing_hair: string | null
   missing_eyes: string | null
   missing_marks: string | null
+  missing_jewelry: string | null
   unidentified_doe_id: string | null
   unidentified_sex: string | null
   unidentified_race: string | null
@@ -55,6 +56,7 @@ interface DoeMatchCandidate {
   unidentified_hair: string | null
   unidentified_eyes: string | null
   unidentified_marks: string | null
+  unidentified_jewelry: string | null
   reviewer_status: string
   reviewer_note: string | null
   ai_assessment: AiAssessment | null
@@ -244,7 +246,9 @@ const SIGNAL_DEFS: { key: string; label: string; Icon: ComponentType<{ className
   { key: 'eyes',       label: 'Eyes',       Icon: Eye },
   { key: 'height',     label: 'Height',     Icon: Ruler },
   { key: 'weight',     label: 'Weight',     Icon: Scale },
-  { key: 'marks',      label: 'Marks',      Icon: Fingerprint },
+  { key: 'tattoo',     label: 'Tattoo',     Icon: Fingerprint },
+  { key: 'body_marks', label: 'Marks',      Icon: Fingerprint },
+  { key: 'jewelry',    label: 'Jewelry',    Icon: Fingerprint },
   { key: 'location',   label: 'State',      Icon: MapPin },
   { key: 'childbirth', label: 'Childbirth', Icon: Users },
 ]
@@ -310,7 +314,7 @@ function MatchCard({ match, onReview }: {
                   <Badge className={`text-[9px] px-1 py-0 ${GRADE_COLOR[match.grade]}`}>
                     {GRADE_LABEL[match.grade]}
                   </Badge>
-                  <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{countPositiveSignals(match.signals)}/9</div>
+                  <div className="text-[9px] text-slate-400 mt-0.5 font-mono">{countPositiveSignals(match.signals)}/{SIGNAL_DEFS.length}</div>
                 </div>
 
                 {/* People */}
@@ -433,25 +437,47 @@ function MatchCard({ match, onReview }: {
                 <SignalBar label="Eyes"        signal={match.signals.eyes}                                    icon={Eye} />
                 <SignalBar label="Height"      signal={match.signals.height}                                  icon={Ruler} />
                 <SignalBar label="Weight"      signal={match.signals.weight}                                  icon={Scale} />
-                <SignalBar label="Marks"       signal={match.signals.marks}                                   icon={Fingerprint} />
+                <SignalBar label="Tattoo"      signal={match.signals.tattoo}                                  icon={Fingerprint} />
+                <SignalBar label="Marks"       signal={match.signals.body_marks}                              icon={Fingerprint} />
+                <SignalBar label="Jewelry"     signal={match.signals.jewelry}                                 icon={Fingerprint} />
                 <SignalBar label="State"       signal={match.signals.location}                                icon={MapPin} />
                 <SignalBar label="Childbirth"  signal={match.signals.childbirth as typeof match.signals.sex}  icon={Users} />
               </div>
             </div>
 
-            {/* Distinguishing marks full text */}
-            {(match.missing_marks || match.unidentified_marks) && (
-              <div className="grid grid-cols-2 gap-3">
-                {match.missing_marks && (
-                  <div>
-                    <p className="text-[10px] text-slate-400 font-medium mb-0.5">Missing — marks</p>
-                    <p className="text-[11px] text-slate-600">{match.missing_marks}</p>
+            {/* Distinguishing marks + jewelry full text */}
+            {(match.missing_marks || match.unidentified_marks || match.missing_jewelry || match.unidentified_jewelry) && (
+              <div className="space-y-2">
+                {(match.missing_marks || match.unidentified_marks) && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {match.missing_marks && (
+                      <div>
+                        <p className="text-[10px] text-slate-400 font-medium mb-0.5">Missing — marks</p>
+                        <p className="text-[11px] text-slate-600">{match.missing_marks}</p>
+                      </div>
+                    )}
+                    {match.unidentified_marks && (
+                      <div>
+                        <p className="text-[10px] text-slate-400 font-medium mb-0.5">Unidentified — marks</p>
+                        <p className="text-[11px] text-slate-600">{match.unidentified_marks}</p>
+                      </div>
+                    )}
                   </div>
                 )}
-                {match.unidentified_marks && (
-                  <div>
-                    <p className="text-[10px] text-slate-400 font-medium mb-0.5">Unidentified — marks</p>
-                    <p className="text-[11px] text-slate-600">{match.unidentified_marks}</p>
+                {(match.missing_jewelry || match.unidentified_jewelry) && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {match.missing_jewelry && (
+                      <div>
+                        <p className="text-[10px] text-slate-400 font-medium mb-0.5">Missing — jewelry</p>
+                        <p className="text-[11px] text-slate-600">{match.missing_jewelry}</p>
+                      </div>
+                    )}
+                    {match.unidentified_jewelry && (
+                      <div>
+                        <p className="text-[10px] text-slate-400 font-medium mb-0.5">Unidentified — jewelry</p>
+                        <p className="text-[11px] text-slate-600">{match.unidentified_jewelry}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1153,6 +1179,8 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
   const [signalCountFilter, setSignalCountFilter] = useState(0)
   const [marksFilter, setMarksFilter] = useState(false)
+  const [aiVerdictFilter, setAiVerdictFilter] = useState<'all' | 'plausible' | 'uncertain' | 'unlikely' | 'reviewed'>('all')
+  const [personShowLimit, setPersonShowLimit] = useState<Map<string, number>>(new Map())
 
   const supabase = createClient()
 
@@ -1447,17 +1475,30 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     setAiReviewRunning(true)
     setAiReviewProgress({ reviewed: 0, remaining: 0 })
     let totalReviewed = 0
+    let consecutiveErrors = 0
     try {
       while (true) {
-        const res = await fetch('/api/pattern/doe-match/ai-review', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ missingCaseId: effectiveCaseId, batchSize: 15 }),
-        })
-        const data = await res.json() as { reviewed: number; hasMore: boolean; remaining: number }
+        let data: { reviewed: number; hasMore: boolean; remaining: number } | null = null
+        try {
+          const res = await fetch('/api/pattern/doe-match/ai-review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ missingCaseId: effectiveCaseId, batchSize: 5 }),
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          data = await res.json() as { reviewed: number; hasMore: boolean; remaining: number }
+          consecutiveErrors = 0
+        } catch {
+          consecutiveErrors++
+          if (consecutiveErrors >= 3) break
+          await new Promise(r => setTimeout(r, 2000))
+          continue
+        }
         totalReviewed += data.reviewed
         setAiReviewProgress({ reviewed: totalReviewed, remaining: data.remaining })
         if (!data.hasMore || data.reviewed === 0) break
+        // Small pause between batches to avoid rate limits
+        await new Promise(r => setTimeout(r, 500))
       }
       queryClient.invalidateQueries({ queryKey: ['doe-matches', effectiveCaseId] })
     } finally {
@@ -1468,7 +1509,16 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const allMatches = matchQuery.data?.matches ?? []
   const matches = allMatches
     .filter(m => signalCountFilter === 0 || countPositiveSignals(m.signals) >= signalCountFilter)
-    .filter(m => !marksFilter || ((m.signals.marks as { score: number; match: string } | undefined)?.score ?? 0) > 0)
+    .filter(m => !marksFilter || (
+      ((m.signals.tattoo     as { score: number } | undefined)?.score ?? 0) > 0 ||
+      ((m.signals.body_marks as { score: number } | undefined)?.score ?? 0) > 0 ||
+      ((m.signals.jewelry    as { score: number } | undefined)?.score ?? 0) > 0
+    ))
+    .filter(m => {
+      if (aiVerdictFilter === 'all') return true
+      if (aiVerdictFilter === 'reviewed') return m.ai_assessment !== null
+      return m.ai_assessment?.verdict === aiVerdictFilter
+    })
 
   // Group matches by missing person, sorted by score desc then location score (distance proxy)
   const groupedMatches = useMemo(() => {
@@ -1661,37 +1711,69 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 items-center">
+      <div className="space-y-2">
         {activeTab === 'matches' && (
           <>
-            <div className="flex gap-1 flex-wrap">
-              {GRADE_FILTERS.map(g => (
-                <button key={g} onClick={() => { setGradeFilter(g); setPage(0) }}
-                  className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
-                    ${gradeFilter === g ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
-                  {GRADE_FILTER_LABELS[g] ?? g}
-                </button>
-              ))}
+            {/* AI verdict filter — prominent, own row */}
+            <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+              <span className="flex items-center gap-1 text-[11px] font-medium text-slate-500 whitespace-nowrap">
+                <Sparkles className="h-3 w-3" />
+                AI verdict
+              </span>
+              <div className="flex gap-1 flex-wrap">
+                {([
+                  { value: 'all',      label: 'All',      cls: 'bg-white text-slate-600 border-slate-300 hover:border-slate-400' },
+                  { value: 'reviewed', label: 'Reviewed', cls: 'bg-white text-slate-600 border-slate-300 hover:border-slate-400' },
+                  { value: 'plausible',label: '✓ Plausible', cls: 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100' },
+                  { value: 'uncertain',label: '? Uncertain', cls: 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' },
+                  { value: 'unlikely', label: '✗ Unlikely',  cls: 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200' },
+                ] as const).map(f => (
+                  <button key={f.value} onClick={() => { setAiVerdictFilter(f.value); setPage(0) }}
+                    className={`px-2.5 py-1 text-[11px] font-medium rounded border transition-colors
+                      ${aiVerdictFilter === f.value
+                        ? f.value === 'plausible' ? 'bg-green-600 text-white border-green-600'
+                        : f.value === 'uncertain' ? 'bg-amber-500 text-white border-amber-500'
+                        : f.value === 'unlikely'  ? 'bg-slate-500 text-white border-slate-500'
+                        : 'bg-slate-900 text-white border-slate-900'
+                        : f.cls}`}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex gap-1 flex-wrap">
-              {[0, 2, 3, 4, 5].map(n => (
-                <button key={n} onClick={() => { setSignalCountFilter(n); setPage(0) }}
-                  className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
-                    ${signalCountFilter === n ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
-                  {n === 0 ? 'Any signals' : `${n}+ signals`}
-                </button>
-              ))}
+
+            {/* Secondary filters row */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <div className="flex gap-1 flex-wrap">
+                {GRADE_FILTERS.map(g => (
+                  <button key={g} onClick={() => { setGradeFilter(g); setPage(0) }}
+                    className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
+                      ${gradeFilter === g ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                    {GRADE_FILTER_LABELS[g] ?? g}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1 flex-wrap">
+                {[0, 2, 3, 4, 5].map(n => (
+                  <button key={n} onClick={() => { setSignalCountFilter(n); setPage(0) }}
+                    className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
+                      ${signalCountFilter === n ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                    {n === 0 ? 'Any signals' : `${n}+ signals`}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => { setMarksFilter(v => !v); setPage(0) }}
+                className={`flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border transition-colors
+                  ${marksFilter ? 'bg-amber-700 text-white border-amber-700' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+              >
+                <Fingerprint className="h-2.5 w-2.5" />
+                Tattoos/marks/jewelry
+              </button>
             </div>
-            <button
-              onClick={() => { setMarksFilter(v => !v); setPage(0) }}
-              className={`flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border transition-colors
-                ${marksFilter ? 'bg-amber-700 text-white border-amber-700' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
-            >
-              <Fingerprint className="h-2.5 w-2.5" />
-              Marks/scars overlap
-            </button>
           </>
         )}
+        <div className="flex flex-wrap gap-2 items-center">
         {activeTab === 'clusters' && (
           <div className="flex gap-1 flex-wrap">
             {([
@@ -1754,6 +1836,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
             ))}
           </div>
         )}
+        </div>
       </div>
 
       {/* Results */}
@@ -1797,9 +1880,21 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                   </div>
                   {/* Match cards indented */}
                   <div className="space-y-1.5 pl-3 border-l-2 border-slate-100">
-                    {group.matches.map(m => (
+                    {group.matches.slice(0, personShowLimit.get(group.submissionId) ?? 10).map(m => (
                       <MatchCard key={m.id} match={m} onReview={reviewMatch} />
                     ))}
+                    {group.matches.length > (personShowLimit.get(group.submissionId) ?? 10) && (
+                      <button
+                        className="text-[11px] text-indigo-500 hover:text-indigo-700 px-1 py-0.5"
+                        onClick={() => setPersonShowLimit(prev => {
+                          const next = new Map(prev)
+                          next.set(group.submissionId, (prev.get(group.submissionId) ?? 10) + 10)
+                          return next
+                        })}
+                      >
+                        Show {Math.min(10, group.matches.length - (personShowLimit.get(group.submissionId) ?? 10))} more matches for this person
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
