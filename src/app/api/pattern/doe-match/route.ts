@@ -13,6 +13,8 @@
  *   detect_stalls           — flag voluntary/runaway classifications with years elapsed, no resolution
  *   location_runaway_cluster — 3+ runaway/voluntary cases from same city within a 5-year window
  *   corridor_cluster        — cases whose circumstances mention a major US highway corridor
+ *   highway_proximity       — cases where disappearance city is within ~20mi of an interstate
+ *   national_park_proximity — cases where disappearance city is within ~20mi of a national park/wilderness
  *   age_bracket_cluster     — 4+ cases in same sex+state with age SD ≤ 3.5yr spanning 5+ years
  *
  * GET  — fetch candidates, clusters, stalls, entities, or cluster_members
@@ -259,6 +261,176 @@ const CORRIDORS: Array<{ id: string; label: string; patterns: RegExp[] }> = [
   { id: 'I-25',  label: 'I-25 (Rocky Mountain)',         patterns: [/\bI-?25\b/i, /interstate\s*25\b/i] },
   { id: 'I-65',  label: 'I-65 (Central South)',          patterns: [/\bI-?65\b/i, /interstate\s*65\b/i] },
 ]
+
+// ─── Highway proximity lookup ─────────────────────────────────────────────────
+// Cities within ~20 miles of major interstate corridors
+// Format: 'City' → ['I-xx', ...] (corridor IDs)
+// Compiled from geographic proximity — this is a signal, not a precise measurement.
+// Focus on corridors known to law enforcement as dumping/transit routes.
+const HIGHWAY_PROXIMITY: Record<string, string[]> = {
+  // I-10 belt (Gulf Coast / Southwest)
+  'Jacksonville': ['I-10','I-95'], 'Tallahassee': ['I-10'], 'Pensacola': ['I-10'],
+  'Mobile': ['I-10','I-65'], 'Biloxi': ['I-10'], 'Gulfport': ['I-10'],
+  'New Orleans': ['I-10','I-55'], 'Baton Rouge': ['I-10'], 'Lafayette': ['I-10'],
+  'Beaumont': ['I-10'], 'Houston': ['I-10','I-45'], 'San Antonio': ['I-10','I-35'],
+  'El Paso': ['I-10','I-25'], 'Las Cruces': ['I-10','I-25'],
+  'Tucson': ['I-10','I-19'], 'Phoenix': ['I-10'], 'Tempe': ['I-10'],
+  'Mesa': ['I-10'], 'Chandler': ['I-10'], 'Glendale': ['I-10'],
+  'Palm Springs': ['I-10'], 'Ontario': ['I-10'], 'Pomona': ['I-10'],
+  'Los Angeles': ['I-10','US-101'], 'Santa Monica': ['I-10'],
+  // I-20 (Deep South)
+  'Atlanta': ['I-20','I-75','I-85'], 'Augusta': ['I-20'],
+  'Columbia': ['I-20','I-26'], 'Charlotte': ['I-85'],
+  'Birmingham': ['I-20','I-65'], 'Tuscaloosa': ['I-20'],
+  'Jackson': ['I-20','I-55'], 'Vicksburg': ['I-20'],
+  'Shreveport': ['I-20'], 'Dallas': ['I-20','I-35'],
+  'Fort Worth': ['I-20','I-35'], 'Abilene': ['I-20'],
+  'Midland': ['I-20'], 'Odessa': ['I-20'],
+  // I-35 (Central corridor — border to Minnesota)
+  'Laredo': ['I-35'], 'San Marcos': ['I-35'], 'Austin': ['I-35'],
+  'Waco': ['I-35'], 'Temple': ['I-35'], 'Killeen': ['I-35'],
+  'Oklahoma City': ['I-35','I-40','I-44'], 'Norman': ['I-35'],
+  'Wichita': ['I-35'], 'Salina': ['I-35'],
+  'Kansas City': ['I-35','I-70'], 'Overland Park': ['I-35'],
+  'Des Moines': ['I-35','I-80'], 'Ames': ['I-35'],
+  'Minneapolis': ['I-35','I-94'], 'Bloomington': ['I-35'],
+  'Duluth': ['I-35'],
+  // I-40 (East-West midline)
+  'Memphis': ['I-40','I-55'], 'Nashville': ['I-40','I-65','I-24'],
+  'Knoxville': ['I-40','I-75'], 'Asheville': ['I-40'],
+  'Little Rock': ['I-40','I-30'], 'Fort Smith': ['I-40'],
+  'Tulsa': ['I-40','I-44'],
+  'Amarillo': ['I-40'], 'Albuquerque': ['I-40','I-25'],
+  'Flagstaff': ['I-40'], 'Barstow': ['I-40'],
+  // I-55 (Mississippi Valley)
+  'Chicago': ['I-55','I-90','I-94'], 'Joliet': ['I-55'],
+  'Springfield': ['I-55'], 'St. Louis': ['I-55','I-70'],
+  'Cape Girardeau': ['I-55'], 'Blytheville': ['I-55'],
+  'West Memphis': ['I-55'], 'Greenville': ['I-55'],
+  'Greenwood': ['I-55'], 'Batesville': ['I-55'],
+  // I-65 (Central South — Gulf to Great Lakes)
+  'Huntsville': ['I-65'], 'Decatur': ['I-65'],
+  'Bowling Green': ['I-65'], 'Louisville': ['I-65','I-64'],
+  'Indianapolis': ['I-65','I-70','I-74'], 'Columbus': ['I-65'],
+  // I-75 (Southeast — Michigan to Florida)
+  'Detroit': ['I-75','I-94'], 'Flint': ['I-75'],
+  'Toledo': ['I-75','I-80'], 'Dayton': ['I-75','I-70'],
+  'Cincinnati': ['I-75'], 'Lexington': ['I-75'],
+  'Corbin': ['I-75'], 'Chattanooga': ['I-75','I-24'],
+  'Dalton': ['I-75'], 'Gainesville': ['I-75'],
+  'Ocala': ['I-75'], 'Tampa': ['I-75','I-4'],
+  'Naples': ['I-75'],
+  // I-80 (Northern Transcontinental)
+  'Sacramento': ['I-80'], 'Reno': ['I-80'],
+  'Salt Lake City': ['I-80','I-15'], 'Ogden': ['I-80'],
+  'Elko': ['I-80'], 'Battle Mountain': ['I-80'],
+  'Winnemucca': ['I-80'], 'Cheyenne': ['I-80','I-25'],
+  'Laramie': ['I-80'], 'Rawlins': ['I-80'],
+  'Rock Springs': ['I-80'], 'Evanston': ['I-80'],
+  'Lincoln': ['I-80'], 'Omaha': ['I-80','I-29'],
+  'Iowa City': ['I-80'], 'Davenport': ['I-80'],
+  'Moline': ['I-80'], 'South Bend': ['I-80'],
+  'Cleveland': ['I-80','I-77'],
+  'Youngstown': ['I-80'], 'Erie': ['I-80'],
+  // I-90 (Northern — Seattle to Boston)
+  'Seattle': ['I-90','I-5'], 'Bellevue': ['I-90'],
+  'Spokane': ['I-90'], 'Missoula': ['I-90'],
+  'Billings': ['I-90'], 'Sheridan': ['I-90'],
+  'Buffalo': ['I-90'], 'Rochester': ['I-90'],
+  'Syracuse': ['I-90'], 'Albany': ['I-90','I-87'],
+  'Boston': ['I-90','I-93','I-95'], 'Worcester': ['I-90'],
+  // I-95 (East Coast)
+  'Miami': ['I-95'], 'Fort Lauderdale': ['I-95'],
+  'West Palm Beach': ['I-95'], 'Orlando': ['I-95','I-4'],
+  'Daytona Beach': ['I-95'], 'Savannah': ['I-95'],
+  'Charleston': ['I-95','I-26'], 'Fayetteville': ['I-95'],
+  'Raleigh': ['I-95','I-40'], 'Rocky Mount': ['I-95'],
+  'Richmond': ['I-95'], 'Fredericksburg': ['I-95'],
+  'Washington': ['I-95'], 'Baltimore': ['I-95'],
+  'Wilmington': ['I-95'], 'Philadelphia': ['I-95'],
+  'Trenton': ['I-95'], 'Newark': ['I-95'],
+  'New York': ['I-95','US-1'], 'Bridgeport': ['I-95'],
+  'New Haven': ['I-95'], 'Providence': ['I-95'],
+  // I-25 (Rocky Mountain)
+  'Denver': ['I-25','I-70'], 'Colorado Springs': ['I-25'],
+  'Pueblo': ['I-25'], 'Trinidad': ['I-25'],
+  'Raton': ['I-25'], 'Santa Fe': ['I-25'],
+  // US-101 / Pacific Coast
+  'San Francisco': ['US-101','I-80'], 'Oakland': ['US-101'],
+  'San Jose': ['US-101'], 'Santa Cruz': ['US-101'],
+  'Santa Barbara': ['US-101'], 'Ventura': ['US-101'],
+  'San Luis Obispo': ['US-101'], 'Salinas': ['US-101'],
+  'Eureka': ['US-101'], 'Portland': ['US-101','I-5'],
+  'Salem': ['US-101','I-5'],
+}
+
+// ─── National park / wilderness proximity lookup ───────────────────────────────
+// Cities/towns within ~20 miles of a major national park or wilderness area
+// Used to identify cases where remains may be in remote/undiscovered terrain.
+const NATIONAL_PARK_PROXIMITY: Record<string, string[]> = {
+  // Yellowstone / Grand Teton
+  'Jackson': ['Grand Teton NP'], 'Cody': ['Yellowstone NP'],
+  'Gardiner': ['Yellowstone NP'], 'West Yellowstone': ['Yellowstone NP'],
+  'Livingston': ['Yellowstone NP'], 'Driggs': ['Grand Teton NP'],
+  'Afton': ['Grand Teton NP'],
+  // Grand Canyon
+  'Williams': ['Grand Canyon NP'], 'Flagstaff': ['Grand Canyon NP'],
+  'Kanab': ['Grand Canyon NP','Zion NP'],
+  'Grand Canyon Village': ['Grand Canyon NP'],
+  // Zion / Bryce
+  'St. George': ['Zion NP'], 'Springdale': ['Zion NP'],
+  'Panguitch': ['Bryce Canyon NP'], 'Escalante': ['Grand Staircase NM'],
+  // Great Smoky Mountains
+  'Gatlinburg': ['Great Smoky Mountains NP'],
+  'Pigeon Forge': ['Great Smoky Mountains NP'],
+  'Cherokee': ['Great Smoky Mountains NP'],
+  'Bryson City': ['Great Smoky Mountains NP'],
+  // Shenandoah
+  'Luray': ['Shenandoah NP'], 'Front Royal': ['Shenandoah NP'],
+  'Waynesboro': ['Shenandoah NP','AT Corridor'],
+  // Olympic
+  'Port Angeles': ['Olympic NP'], 'Sequim': ['Olympic NP'],
+  'Forks': ['Olympic NP'],
+  // Mt Rainier / Cascades
+  'Enumclaw': ['Mt Rainier NP'], 'Packwood': ['Mt Rainier NP'],
+  'Ashford': ['Mt Rainier NP'], 'Winthrop': ['North Cascades NP'],
+  // Rocky Mountain NP
+  'Estes Park': ['Rocky Mountain NP'], 'Grand Lake': ['Rocky Mountain NP'],
+  'Loveland': ['Rocky Mountain NP'],
+  // Glacier
+  'Whitefish': ['Glacier NP'], 'Kalispell': ['Glacier NP'],
+  'Browning': ['Glacier NP'], 'Cut Bank': ['Glacier NP'],
+  // Everglades / Big Cypress
+  'Homestead': ['Everglades NP'], 'Florida City': ['Everglades NP'],
+  'Immokalee': ['Big Cypress Preserve'], 'Naples': ['Big Cypress Preserve','I-75'],
+  // Appalachian Trail corridor (high disappearance rate)
+  'Harpers Ferry': ['AT Corridor'],
+  'Hot Springs': ['AT Corridor','Ouachita NF'], 'Erwin': ['AT Corridor'],
+  'Springer Mountain': ['AT Corridor'],
+  // Ozark / Ouachita
+  'Harrison': ['Ozark NF'], 'Mountain View': ['Ozark NF'],
+  'Mena': ['Ouachita NF'],
+  // Angeles / San Bernardino (LA basin — high missing persons volume)
+  'Palmdale': ['Angeles NF'], 'Lancaster': ['Angeles NF'],
+  'Victorville': ['San Bernardino NF'], 'Big Bear': ['San Bernardino NF'],
+  'Redlands': ['San Bernardino NF'],
+  // Shasta-Trinity / Klamath
+  'Redding': ['Shasta-Trinity NF'], 'Weaverville': ['Shasta-Trinity NF'],
+  'Yreka': ['Klamath NF'], 'Happy Camp': ['Klamath NF'],
+  // Lake Mead / Mojave
+  'Needles': ['Mojave NP'], 'Twentynine Palms': ['Joshua Tree NP'],
+  'Yucca Valley': ['Joshua Tree NP'], 'Palm Springs': ['San Jacinto NF','I-10'],
+  'Henderson': ['Lake Mead NRA'], 'Boulder City': ['Lake Mead NRA'],
+  // Pisgah / Nantahala
+  'Asheville': ['Pisgah NF','I-40'], 'Brevard': ['Pisgah NF'],
+  'Murphy': ['Nantahala NF'], 'Robbinsville': ['Nantahala NF'],
+  // Green Mountain / White Mountain
+  'Burlington': ['Green Mountain NF'], 'Rutland': ['Green Mountain NF'],
+  'Conway': ['White Mountain NF'], 'North Conway': ['White Mountain NF'],
+  // Tongass (SE Alaska)
+  'Ketchikan': ['Tongass NF'], 'Sitka': ['Tongass NF'],
+  'Juneau': ['Tongass NF'], 'Wrangell': ['Tongass NF'],
+}
 
 // ─── Body state decomposition weighting ──────────────────────────────────────
 //
@@ -2143,6 +2315,273 @@ export async function POST(req: NextRequest) {
       membersInserted: toInsertMembers.length,
       totalCasesAnalyzed: withCity.length,
       anomalyThreshold: '2.0×',
+    })
+  }
+
+  // ── HIGHWAY PROXIMITY CLUSTER ─────────────────────────────────────────────────
+  // Cases where the disappearance/discovery city is within ~20 miles of a major
+  // interstate corridor — the "radial dumping zone" pattern.
+  // Uses city lookup rather than text mention (different from corridor_cluster).
+  if (action === 'highway_proximity') {
+    const { data: allRaw } = await supabase
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+    const parsed = (allRaw ?? []).map(s => parseSubmission(s as RawSubmission))
+
+    // Delete old highway_proximity clusters
+    const { data: oldHP } = await supabase
+      .from('doe_victimology_clusters' as never).select('id')
+      .eq('case_id', missingCaseId).eq('cluster_type', 'highway_proximity') as { data: Array<{ id: string }> | null }
+    if (oldHP?.length) {
+      await supabase.from('doe_cluster_members' as never).delete().in('cluster_id', oldHP.map(c => c.id))
+      await supabase.from('doe_victimology_clusters' as never).delete().in('id', oldHP.map(c => c.id))
+    }
+
+    function extractCityHP(loc: string | null): string | null {
+      if (!loc) return null
+      const city = loc.split(',')[0].trim()
+      if (city.length < 2 || /unknown|unclear|various/i.test(city)) return null
+      return city
+    }
+
+    // Group by corridor
+    const corridorBuckets = new Map<string, ParsedCase[]>()
+
+    for (const p of parsed) {
+      const city = extractCityHP(p.location)
+      if (!city) continue
+      // Case-insensitive lookup
+      const matchedKey = Object.keys(HIGHWAY_PROXIMITY).find(k =>
+        k.toLowerCase() === city.toLowerCase()
+      )
+      if (!matchedKey) continue
+      for (const corridorId of HIGHWAY_PROXIMITY[matchedKey]) {
+        if (!corridorBuckets.has(corridorId)) corridorBuckets.set(corridorId, [])
+        corridorBuckets.get(corridorId)!.push(p)
+      }
+    }
+
+    const toInsert: object[] = []
+    const memberRows: object[] = []
+
+    for (const [corridorId, subs] of corridorBuckets) {
+      if (subs.length < 3) continue
+      // Remove duplicate submissions (a case can be near two corridors)
+      const unique = Array.from(new Map(subs.map(s => [s.submissionId, s])).values())
+      if (unique.length < 3) continue
+
+      const years = unique.map(s => s.year).filter(Boolean) as number[]
+      const yearMin = years.length ? Math.min(...years) : null
+      const yearMax = years.length ? Math.max(...years) : null
+
+      const stateCounts: Record<string, number> = {}
+      for (const s of unique) if (s.state) stateCounts[s.state] = (stateCounts[s.state] ?? 0) + 1
+
+      const sexCounts: Record<string, number> = {}
+      for (const s of unique) {
+        const sx = normSex(s.sex) ?? 'unknown'
+        sexCounts[sx] = (sexCounts[sx] ?? 0) + 1
+      }
+
+      const raceCounts: Record<string, number> = {}
+      for (const s of unique) {
+        const rc = normRace(s.race) ?? 'unknown'
+        raceCounts[rc] = (raceCounts[rc] ?? 0) + 1
+      }
+
+      const topState = Object.entries(stateCounts).sort(([, a], [, b]) => b - a)[0]?.[0] ?? null
+      const yearRange = yearMin && yearMax ? (yearMin === yearMax ? String(yearMin) : `${yearMin}–${yearMax}`) : ''
+      const corridorLabel = CORRIDORS.find(c => c.id === corridorId)?.label ?? corridorId
+      const confidence = Math.min(0.85, 0.55 + unique.length * 0.03)
+      const clusterId = crypto.randomUUID()
+
+      toInsert.push({
+        id: clusterId,
+        case_id: missingCaseId,
+        cluster_label: `${unique.length} cases near ${corridorId} corridor${yearRange ? ` (${yearRange})` : ''}`,
+        cluster_type: 'highway_proximity',
+        state: topState,
+        case_count: unique.length,
+        year_span_start: yearMin,
+        year_span_end: yearMax,
+        submission_ids: unique.map(s => s.submissionId),
+        signals: {
+          corridor_id: corridorId,
+          corridor_label: corridorLabel,
+          state_counts: stateCounts,
+          sex_counts: sexCounts,
+          race_counts: raceCounts,
+          note: 'Cases where disappearance city is within ~20 miles of corridor — geographic proximity, not text mention',
+        },
+      })
+
+      for (const sub of unique) {
+        memberRows.push({
+          cluster_id: clusterId,
+          submission_id: sub.submissionId,
+          case_id: missingCaseId,
+          confidence: Math.round(confidence * 1000) / 1000,
+          confidence_reason: `Disappearance location within ~20 miles of ${corridorId}`,
+          membership_status: 'candidate',
+          member_name: sub.name,
+          member_doe_id: sub.doeId,
+          member_location: sub.location,
+          member_date: sub.date,
+          member_age: sub.age,
+          member_sex: sub.sex,
+        })
+      }
+    }
+
+    let insertedClusters = 0
+    for (let i = 0; i < toInsert.length; i += 50) {
+      const { error } = await supabase.from('doe_victimology_clusters' as never)
+        .insert(toInsert.slice(i, i + 50) as never)
+      if (!error) insertedClusters += Math.min(50, toInsert.length - i)
+    }
+    for (let i = 0; i < memberRows.length; i += 100) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRows.slice(i, i + 100) as never)
+    }
+
+    return NextResponse.json({
+      action: 'highway_proximity',
+      clustersInserted: insertedClusters,
+      membersInserted: memberRows.length,
+      corridorsFound: corridorBuckets.size,
+      totalCases: parsed.length,
+    })
+  }
+
+  // ── NATIONAL PARK PROXIMITY CLUSTER ───────────────────────────────────────────
+  // Cases where the disappearance/discovery city is near a major national park
+  // or wilderness area. Remote terrain delays discovery; clusters here warrant
+  // investigator attention for dumping vs. lost hiker pattern.
+  if (action === 'national_park_proximity') {
+    const { data: allRaw } = await supabase
+      .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId)
+    const parsed = (allRaw ?? []).map(s => parseSubmission(s as RawSubmission))
+
+    // Delete old clusters
+    const { data: oldNP } = await supabase
+      .from('doe_victimology_clusters' as never).select('id')
+      .eq('case_id', missingCaseId).eq('cluster_type', 'national_park_proximity') as { data: Array<{ id: string }> | null }
+    if (oldNP?.length) {
+      await supabase.from('doe_cluster_members' as never).delete().in('cluster_id', oldNP.map(c => c.id))
+      await supabase.from('doe_victimology_clusters' as never).delete().in('id', oldNP.map(c => c.id))
+    }
+
+    function extractCityNP(loc: string | null): string | null {
+      if (!loc) return null
+      const city = loc.split(',')[0].trim()
+      if (city.length < 2 || /unknown|unclear|various/i.test(city)) return null
+      return city
+    }
+
+    // Group by park
+    const parkBuckets = new Map<string, ParsedCase[]>()
+
+    for (const p of parsed) {
+      const city = extractCityNP(p.location)
+      if (!city) continue
+      const matchedKey = Object.keys(NATIONAL_PARK_PROXIMITY).find(k =>
+        k.toLowerCase() === city.toLowerCase()
+      )
+      if (!matchedKey) continue
+      for (const park of NATIONAL_PARK_PROXIMITY[matchedKey]) {
+        if (!parkBuckets.has(park)) parkBuckets.set(park, [])
+        parkBuckets.get(park)!.push(p)
+      }
+    }
+
+    const toInsert: object[] = []
+    const memberRows: object[] = []
+
+    for (const [park, subs] of parkBuckets) {
+      if (subs.length < 2) continue
+      const unique = Array.from(new Map(subs.map(s => [s.submissionId, s])).values())
+      if (unique.length < 2) continue
+
+      const years = unique.map(s => s.year).filter(Boolean) as number[]
+      const yearMin = years.length ? Math.min(...years) : null
+      const yearMax = years.length ? Math.max(...years) : null
+
+      const stateCounts: Record<string, number> = {}
+      for (const s of unique) if (s.state) stateCounts[s.state] = (stateCounts[s.state] ?? 0) + 1
+
+      const sexCounts: Record<string, number> = {}
+      for (const s of unique) {
+        const sx = normSex(s.sex) ?? 'unknown'
+        sexCounts[sx] = (sexCounts[sx] ?? 0) + 1
+      }
+
+      const raceCounts: Record<string, number> = {}
+      for (const s of unique) {
+        const rc = normRace(s.race) ?? 'unknown'
+        raceCounts[rc] = (raceCounts[rc] ?? 0) + 1
+      }
+
+      // Flag if high female/minority concentration (pattern signal)
+      const totalWithSex = Object.values(sexCounts).reduce((a, b) => a + b, 0)
+      const femalePct = totalWithSex ? Math.round(((sexCounts['female'] ?? 0) / totalWithSex) * 100) : null
+
+      const topState = Object.entries(stateCounts).sort(([, a], [, b]) => b - a)[0]?.[0] ?? null
+      const yearRange = yearMin && yearMax ? (yearMin === yearMax ? String(yearMin) : `${yearMin}–${yearMax}`) : ''
+      const confidence = Math.min(0.80, 0.50 + unique.length * 0.04)
+      const clusterId = crypto.randomUUID()
+
+      toInsert.push({
+        id: clusterId,
+        case_id: missingCaseId,
+        cluster_label: `${unique.length} cases near ${park}${yearRange ? ` (${yearRange})` : ''}`,
+        cluster_type: 'national_park_proximity',
+        state: topState,
+        case_count: unique.length,
+        year_span_start: yearMin,
+        year_span_end: yearMax,
+        submission_ids: unique.map(s => s.submissionId),
+        signals: {
+          park,
+          state_counts: stateCounts,
+          sex_counts: sexCounts,
+          race_counts: raceCounts,
+          female_pct: femalePct,
+          note: 'Cases near national park/wilderness — remote terrain may delay discovery',
+        },
+      })
+
+      for (const sub of unique) {
+        memberRows.push({
+          cluster_id: clusterId,
+          submission_id: sub.submissionId,
+          case_id: missingCaseId,
+          confidence: Math.round(confidence * 1000) / 1000,
+          confidence_reason: `Location within ~20 miles of ${park}`,
+          membership_status: 'candidate',
+          member_name: sub.name,
+          member_doe_id: sub.doeId,
+          member_location: sub.location,
+          member_date: sub.date,
+          member_age: sub.age,
+          member_sex: sub.sex,
+        })
+      }
+    }
+
+    let insertedClusters = 0
+    for (let i = 0; i < toInsert.length; i += 50) {
+      const { error } = await supabase.from('doe_victimology_clusters' as never)
+        .insert(toInsert.slice(i, i + 50) as never)
+      if (!error) insertedClusters += Math.min(50, toInsert.length - i)
+    }
+    for (let i = 0; i < memberRows.length; i += 100) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRows.slice(i, i + 100) as never)
+    }
+
+    return NextResponse.json({
+      action: 'national_park_proximity',
+      clustersInserted: insertedClusters,
+      membersInserted: memberRows.length,
+      parksFound: parkBuckets.size,
+      totalCases: parsed.length,
     })
   }
 

@@ -644,6 +644,8 @@ const CLUSTER_TYPE_META: Record<string, { label: string; borderColor: string; ic
   corridor_cluster:         { label: 'Corridor',        borderColor: 'border-l-cyan-400',    iconBg: 'bg-cyan-100',    iconColor: 'text-cyan-600' },
   age_bracket:              { label: 'Age bracket',     borderColor: 'border-l-purple-400',  iconBg: 'bg-purple-100',  iconColor: 'text-purple-600' },
   demographic_hotspot:      { label: 'Hotspot',         borderColor: 'border-l-red-400',     iconBg: 'bg-red-100',     iconColor: 'text-red-600' },
+  highway_proximity:        { label: 'Hwy proximity',   borderColor: 'border-l-yellow-400',  iconBg: 'bg-yellow-100',  iconColor: 'text-yellow-700' },
+  national_park_proximity:  { label: 'Wilderness',      borderColor: 'border-l-green-400',   iconBg: 'bg-green-100',   iconColor: 'text-green-700' },
 }
 
 const MEMBER_STATUS_STYLE: Record<string, string> = {
@@ -764,7 +766,7 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
   const isCircumstance = cluster.cluster_type === 'circumstance_signal'
 
   // Load members when expanded (only for new cluster types that have member rows)
-  const hasMembers = ['location_runaway_cluster', 'corridor_cluster', 'age_bracket', 'demographic_hotspot'].includes(cluster.cluster_type)
+  const hasMembers = ['location_runaway_cluster', 'corridor_cluster', 'age_bracket', 'demographic_hotspot', 'highway_proximity', 'national_park_proximity'].includes(cluster.cluster_type)
 
   async function loadMembers() {
     if (!hasMembers || members !== null) return
@@ -826,6 +828,10 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                 <div className={`flex-shrink-0 ${iconBg} rounded-full p-2`}>
                   {cluster.cluster_type === 'corridor_cluster'
                     ? <Car className={`h-4 w-4 ${iconColor}`} />
+                    : cluster.cluster_type === 'highway_proximity'
+                    ? <Car className={`h-4 w-4 ${iconColor}`} />
+                    : cluster.cluster_type === 'national_park_proximity'
+                    ? <MapPin className={`h-4 w-4 ${iconColor}`} />
                     : cluster.cluster_type === 'age_bracket'
                     ? <Scale className={`h-4 w-4 ${iconColor}`} />
                     : cluster.cluster_type === 'location_runaway_cluster'
@@ -876,6 +882,16 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                     {cluster.cluster_type === 'demographic_hotspot' && (clusterSig as { city?: string }).city && (
                       <Badge className="text-[10px] bg-red-50 text-red-700 border-red-200">
                         <MapPin className="h-2.5 w-2.5 mr-0.5" />{(clusterSig as { city: string }).city}
+                      </Badge>
+                    )}
+                    {cluster.cluster_type === 'highway_proximity' && (clusterSig as { corridor_id?: string }).corridor_id && (
+                      <Badge className="text-[10px] bg-yellow-50 text-yellow-700 border-yellow-200">
+                        <Car className="h-2.5 w-2.5 mr-0.5" />{(clusterSig as { corridor_id: string }).corridor_id} corridor
+                      </Badge>
+                    )}
+                    {cluster.cluster_type === 'national_park_proximity' && (clusterSig as { park?: string }).park && (
+                      <Badge className="text-[10px] bg-green-50 text-green-700 border-green-200">
+                        <MapPin className="h-2.5 w-2.5 mr-0.5" />{(clusterSig as { park: string }).park}
                       </Badge>
                     )}
                     {cluster.state && (
@@ -1034,6 +1050,57 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                     </div>
                   </div>
                 ) : null}
+              </div>
+            )}
+
+            {/* Highway proximity stats */}
+            {cluster.cluster_type === 'highway_proximity' && (clusterSig as { corridor_id?: string; corridor_label?: string; sex_counts?: Record<string, number>; race_counts?: Record<string, number> }).corridor_id && (
+              <div className="space-y-2">
+                <div className="p-2 bg-yellow-50 border border-yellow-100 rounded text-[10px] text-yellow-700 italic">
+                  Cases where the disappearance or discovery location is a city within ~20 miles of the {(clusterSig as { corridor_label: string }).corridor_label ?? (clusterSig as { corridor_id: string }).corridor_id} interstate corridor.
+                  Geographic proximity — not text mention. Suggests dumping/transit zone pattern.
+                </div>
+                {(clusterSig as { race_counts?: Record<string, number> }).race_counts && Object.keys((clusterSig as { race_counts: Record<string, number> }).race_counts).length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Demographic breakdown</p>
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries((clusterSig as { race_counts: Record<string, number> }).race_counts).sort(([, a], [, b]) => b - a).map(([race, n]) => (
+                        <span key={race} className="text-[10px] bg-yellow-50 text-yellow-700 border border-yellow-200 px-1.5 py-0.5 rounded">
+                          {race}: {n}
+                        </span>
+                      ))}
+                      {Object.entries((clusterSig as { sex_counts?: Record<string, number> }).sex_counts ?? {}).sort(([, a], [, b]) => b - a).map(([sex, n]) => (
+                        <span key={sex} className="text-[10px] bg-slate-50 text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded">
+                          {sex}: {n}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* National park proximity stats */}
+            {cluster.cluster_type === 'national_park_proximity' && (clusterSig as { park?: string; female_pct?: number; race_counts?: Record<string, number> }).park && (
+              <div className="space-y-2">
+                <div className="p-2 bg-green-50 border border-green-100 rounded text-[10px] text-green-800 italic">
+                  Cases near <strong>{(clusterSig as { park: string }).park}</strong> — remote terrain may significantly delay discovery.
+                  {(clusterSig as { female_pct?: number }).female_pct !== null && (clusterSig as { female_pct?: number }).female_pct !== undefined && (
+                    <> {(clusterSig as { female_pct: number }).female_pct}% of cases in this cluster are female.</>
+                  )}
+                </div>
+                {(clusterSig as { race_counts?: Record<string, number> }).race_counts && Object.keys((clusterSig as { race_counts: Record<string, number> }).race_counts).length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Demographic breakdown</p>
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries((clusterSig as { race_counts: Record<string, number> }).race_counts).sort(([, a], [, b]) => b - a).map(([race, n]) => (
+                        <span key={race} className="text-[10px] bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded">
+                          {race}: {n}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1255,6 +1322,8 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [corridorRunning, setCorridorRunning] = useState(false)
   const [ageBracketRunning, setAgeBracketRunning] = useState(false)
   const [hotspotRunning, setHotspotRunning] = useState(false)
+  const [highwayProximityRunning, setHighwayProximityRunning] = useState(false)
+  const [nationalParkRunning, setNationalParkRunning] = useState(false)
   const [allClustersRunning, setAllClustersRunning] = useState(false)
   const [allClustersStep, setAllClustersStep] = useState('')
   const [entitiesRunning, setEntitiesRunning] = useState(false)
@@ -1263,7 +1332,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [confirmRunning, setConfirmRunning] = useState(false)
   const [aiReviewRunning, setAiReviewRunning] = useState(false)
   const [aiReviewProgress, setAiReviewProgress] = useState<{ reviewed: number; remaining: number } | null>(null)
-  const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity' | 'location_runaway_cluster' | 'corridor_cluster' | 'age_bracket'>('all')
+  const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity' | 'location_runaway_cluster' | 'corridor_cluster' | 'age_bracket' | 'demographic_hotspot' | 'highway_proximity' | 'national_park_proximity'>('all')
   const [stallTypeFilter, setStallTypeFilter] = useState<'all' | 'voluntary_misclassification' | 'runaway_no_followup' | 'quick_closure_young'>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
   const [signalCountFilter, setSignalCountFilter] = useState(0)
@@ -1565,6 +1634,30 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     } finally { setHotspotRunning(false) }
   }, [effectiveCaseId, queryClient])
 
+  const runHighwayProximity = useCallback(async () => {
+    setHighwayProximityRunning(true)
+    try {
+      await fetch('/api/pattern/doe-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'highway_proximity', missingCaseId: effectiveCaseId }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
+    } finally { setHighwayProximityRunning(false) }
+  }, [effectiveCaseId, queryClient])
+
+  const runNationalPark = useCallback(async () => {
+    setNationalParkRunning(true)
+    try {
+      await fetch('/api/pattern/doe-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'national_park_proximity', missingCaseId: effectiveCaseId }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['doe-clusters', effectiveCaseId] })
+    } finally { setNationalParkRunning(false) }
+  }, [effectiveCaseId, queryClient])
+
   const runAllClusters = useCallback(async () => {
     setAllClustersRunning(true)
     const steps = [
@@ -1575,6 +1668,8 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       { label: 'Location…',       action: 'location_runaway_cluster' },
       { label: 'Corridors…',      action: 'corridor_cluster' },
       { label: 'Age bracket…',    action: 'age_bracket_cluster' },
+      { label: 'Hwy proximity…',  action: 'highway_proximity' },
+      { label: 'Wilderness…',     action: 'national_park_proximity' },
     ]
     try {
       for (const step of steps) {
@@ -1760,6 +1855,16 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               {hotspotRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Users className="h-3 w-3" />}
               {hotspotRunning ? 'Scanning…' : 'Hotspot'}
             </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-yellow-200 text-yellow-700 hover:bg-yellow-50"
+              disabled={highwayProximityRunning} onClick={runHighwayProximity}>
+              {highwayProximityRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Car className="h-3 w-3" />}
+              {highwayProximityRunning ? 'Scanning…' : 'Hwy proximity'}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-green-200 text-green-700 hover:bg-green-50"
+              disabled={nationalParkRunning} onClick={runNationalPark}>
+              {nationalParkRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
+              {nationalParkRunning ? 'Scanning…' : 'Wilderness'}
+            </Button>
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-slate-300 text-slate-700 hover:bg-slate-50 font-medium"
               disabled={allClustersRunning} onClick={runAllClusters}>
               {allClustersRunning ? <><Loader2 className="h-3 w-3 animate-spin" />{allClustersStep}</> : 'Run all clusters'}
@@ -1918,6 +2023,8 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               { value: 'corridor_cluster',         label: 'Corridor' },
               { value: 'age_bracket',              label: 'Age bracket' },
               { value: 'demographic_hotspot',      label: 'Hotspot' },
+              { value: 'highway_proximity',        label: 'Hwy proximity' },
+              { value: 'national_park_proximity',  label: 'Wilderness' },
             ] as const).map(f => (
               <button key={f.value} onClick={() => { setClusterTypeFilter(f.value); setPage(0) }}
                 className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
