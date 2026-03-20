@@ -1993,6 +1993,7 @@ export async function GET(req: NextRequest) {
   const type           = params.get('type') ?? 'matches'
   const grade          = params.get('grade')
   const reviewerStatus = params.get('reviewerStatus')
+  const aiVerdict      = params.get('aiVerdict')
   const clusterType    = params.get('clusterType')
   const page           = parseInt(params.get('page') ?? '0')
   const PAGE_SIZE = 50
@@ -2079,6 +2080,11 @@ export async function GET(req: NextRequest) {
     q = q.eq('grade', grade)
   }
   if (reviewerStatus)     q = q.eq('reviewer_status', reviewerStatus)
+  if (aiVerdict === 'reviewed') {
+    q = (q as unknown as { not: (col: string, op: string, val: null) => CQ }).not('ai_assessment', 'is', null)
+  } else if (aiVerdict) {
+    q = q.eq('ai_assessment->>verdict', aiVerdict)
+  }
 
   const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

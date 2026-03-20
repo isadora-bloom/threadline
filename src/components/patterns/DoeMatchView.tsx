@@ -1214,15 +1214,16 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
 
   // Fetch match candidates
   const matchQuery = useQuery({
-    queryKey: ['doe-matches', effectiveCaseId, gradeFilter, statusFilter, page],
+    queryKey: ['doe-matches', effectiveCaseId, gradeFilter, statusFilter, aiVerdictFilter, page],
     queryFn: async () => {
       const params = new URLSearchParams({
         missingCaseId: effectiveCaseId,
         type: 'matches',
         page: String(page),
       })
-      if (gradeFilter !== 'all')      params.set('grade', gradeFilter)
-      if (statusFilter !== 'all')     params.set('reviewerStatus', statusFilter)
+      if (gradeFilter !== 'all')          params.set('grade', gradeFilter)
+      if (statusFilter !== 'all')         params.set('reviewerStatus', statusFilter)
+      if (aiVerdictFilter !== 'all')      params.set('aiVerdict', aiVerdictFilter)
       const res = await fetch(`/api/pattern/doe-match?${params}`)
       return await res.json() as { matches: DoeMatchCandidate[]; total: number }
     },
@@ -1514,11 +1515,6 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       ((m.signals.body_marks as { score: number } | undefined)?.score ?? 0) > 0 ||
       ((m.signals.jewelry    as { score: number } | undefined)?.score ?? 0) > 0
     ))
-    .filter(m => {
-      if (aiVerdictFilter === 'all') return true
-      if (aiVerdictFilter === 'reviewed') return m.ai_assessment !== null
-      return m.ai_assessment?.verdict === aiVerdictFilter
-    })
 
   // Group matches by missing person, sorted by score desc then location score (distance proxy)
   const groupedMatches = useMemo(() => {
