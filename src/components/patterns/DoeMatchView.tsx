@@ -766,7 +766,7 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
   const isCircumstance = cluster.cluster_type === 'circumstance_signal'
 
   // Load members when expanded (only for new cluster types that have member rows)
-  const hasMembers = ['location_runaway_cluster', 'corridor_cluster', 'age_bracket', 'demographic_hotspot', 'highway_proximity', 'national_park_proximity'].includes(cluster.cluster_type)
+  const hasMembers = ['location_runaway_cluster', 'corridor_cluster', 'age_bracket', 'demographic_hotspot', 'highway_proximity', 'national_park_proximity', 'demographic_temporal', 'circumstance_signal', 'same_date_proximity'].includes(cluster.cluster_type)
 
   async function loadMembers() {
     if (!hasMembers || members !== null) return

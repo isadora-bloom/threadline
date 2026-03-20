@@ -1317,8 +1317,12 @@ export async function POST(req: NextRequest) {
       .from('submissions').select('id, raw_text, notes').eq('case_id', missingCaseId).limit(10000)
     const parsed = (allRaw ?? []).map(parseSubmission)
 
-    await supabase.from('doe_victimology_clusters' as never)
-      .delete().eq('case_id', missingCaseId).eq('cluster_type', 'demographic_temporal')
+    const { data: oldDT } = await supabase.from('doe_victimology_clusters' as never)
+      .select('id').eq('case_id', missingCaseId).eq('cluster_type', 'demographic_temporal') as { data: Array<{ id: string }> | null }
+    if (oldDT?.length) {
+      await supabase.from('doe_cluster_members' as never).delete().in('cluster_id', oldDT.map(c => c.id))
+      await supabase.from('doe_victimology_clusters' as never).delete().in('id', oldDT.map(c => c.id))
+    }
 
     const buckets = new Map<string, ParsedCase[]>()
     for (const p of parsed) {
@@ -1333,6 +1337,8 @@ export async function POST(req: NextRequest) {
     }
 
     const toInsert: object[] = []
+    const memberRowsDT: object[] = []
+
     for (const [key, subs] of buckets) {
       if (subs.length < 3) continue
       const [sex, race, ag, state] = key.split('|')
@@ -1358,6 +1364,7 @@ export async function POST(req: NextRequest) {
       const years = subs.map(s => s.year).filter(Boolean) as number[]
       const yearMin = years.length ? Math.min(...years) : null
       const yearMax = years.length ? Math.max(...years) : null
+      if (yearMin && yearMax && yearMax - yearMin > 25) continue // 25-year cap
       const ageGroupLabel: Record<string, string> = { child: 'children', teen: 'teens', young_adult: 'young adults', adult: 'adults', middle_age: 'middle-aged', senior: 'seniors' }
       const yearSpan = yearMin && yearMax && yearMin !== yearMax ? ` (${yearMin}–${yearMax})` : yearMax ? ` (${yearMax})` : ''
       const temporal = temporalPattern ? `, ${temporalPattern} pattern` : ''
@@ -1365,8 +1372,11 @@ export async function POST(req: NextRequest) {
       const raceLabel = race === 'unknown' ? 'unknown race' : race
       const sexAgLabel = sex === 'unknown' ? 'persons' : `${sex} ${ageGroupLabel[ag] ?? ag}`
       const label = `${subs.length} ${raceLabel} ${sexAgLabel}${stateLabel}${yearSpan}${temporal}`
+      const clusterId = crypto.randomUUID()
+      const confidence = Math.min(0.85, 0.55 + subs.length * 0.01)
 
       toInsert.push({
+        id: clusterId,
         case_id: missingCaseId, cluster_label: label, cluster_type: 'demographic_temporal',
         sex: sex === 'unknown' ? null : sex, race: race === 'unknown' ? null : race,
         age_group: ag === 'unknown' ? null : ag, state: state === 'unknown' ? null : state,
@@ -1374,6 +1384,17 @@ export async function POST(req: NextRequest) {
         case_count: subs.length, submission_ids: subs.map(s => s.submissionId),
         signals: { month_counts: monthCounts, season_counts: seasonCounts, temporal_count: temporalCount },
       })
+
+      for (const sub of subs) {
+        memberRowsDT.push({
+          cluster_id: clusterId, submission_id: sub.submissionId, case_id: missingCaseId,
+          confidence: Math.round(confidence * 1000) / 1000,
+          confidence_reason: `${raceLabel} ${sexAgLabel}, ${state !== 'unknown' ? state : 'unknown state'}`,
+          membership_status: 'candidate',
+          member_name: sub.name, member_doe_id: sub.doeId, member_location: sub.location,
+          member_date: sub.date, member_age: sub.age, member_sex: sub.sex,
+        })
+      }
     }
 
     let inserted = 0
@@ -1381,8 +1402,11 @@ export async function POST(req: NextRequest) {
       const { error } = await supabase.from('doe_victimology_clusters' as never).insert(toInsert.slice(i, i + 50) as never)
       if (!error) inserted += Math.min(50, toInsert.length - i)
     }
+    for (let i = 0; i < memberRowsDT.length; i += 200) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRowsDT.slice(i, i + 200) as never)
+    }
 
-    return NextResponse.json({ action: 'cluster', clustersInserted: inserted, totalSubmissions: parsed.length })
+    return NextResponse.json({ action: 'cluster', clustersInserted: inserted, membersInserted: memberRowsDT.length, totalSubmissions: parsed.length })
   }
 
   // ── CIRCUMSTANCE CLUSTERING ───────────────────────────────────────────────────
@@ -1395,9 +1419,13 @@ export async function POST(req: NextRequest) {
     const caseSignals = parsed.map(p => ({ p, signals: extractCircumstanceSignals(p) }))
       .filter(({ signals }) => signals.length > 0)
 
-    // Clear old circumstance clusters
-    await supabase.from('doe_victimology_clusters' as never)
-      .delete().eq('case_id', missingCaseId).eq('cluster_type', 'circumstance_signal')
+    // Clear old circumstance clusters and their members
+    const { data: oldCS } = await supabase.from('doe_victimology_clusters' as never)
+      .select('id').eq('case_id', missingCaseId).eq('cluster_type', 'circumstance_signal') as { data: Array<{ id: string }> | null }
+    if (oldCS?.length) {
+      await supabase.from('doe_cluster_members' as never).delete().in('cluster_id', oldCS.map(c => c.id))
+      await supabase.from('doe_victimology_clusters' as never).delete().in('id', oldCS.map(c => c.id))
+    }
 
     // Build clusters: for each signal, find all cases that have it + additional signals
     const signalToSubmissions = new Map<string, ParsedCase[]>()
@@ -1409,6 +1437,7 @@ export async function POST(req: NextRequest) {
     }
 
     const toInsert: object[] = []
+    const memberRowsCS: object[] = []
 
     for (const [primarySignal, subs] of signalToSubmissions) {
       if (subs.length < 3) continue
@@ -1433,13 +1462,17 @@ export async function POST(req: NextRequest) {
       const years = subs.map(s => s.year).filter(Boolean) as number[]
       const yearMin = years.length ? Math.min(...years) : null
       const yearMax = years.length ? Math.max(...years) : null
+      if (yearMin && yearMax && yearMax - yearMin > 25) continue // 25-year cap
 
       // Build label
       const coLabels = topCoSignals.map(s => CIRCUMSTANCE_SIGNALS[s]?.label ?? s).join(', ')
       const yearSpan = yearMin && yearMax && yearMin !== yearMax ? ` (${yearMin}–${yearMax})` : yearMax ? ` (${yearMax})` : ''
       const label = `${subs.length} cases: ${def.label}${coLabels ? ` + ${coLabels}` : ''}${yearSpan}`
+      const clusterId = crypto.randomUUID()
+      const confidence = Math.min(0.88, 0.60 + subs.length * 0.01)
 
       toInsert.push({
+        id: clusterId,
         case_id: missingCaseId,
         cluster_label: label,
         cluster_type: 'circumstance_signal',
@@ -1457,9 +1490,20 @@ export async function POST(req: NextRequest) {
           year_max: yearMax,
         },
       })
+
+      for (const sub of subs) {
+        memberRowsCS.push({
+          cluster_id: clusterId, submission_id: sub.submissionId, case_id: missingCaseId,
+          confidence: Math.round(confidence * 1000) / 1000,
+          confidence_reason: `Circumstances match: ${def.label}`,
+          membership_status: 'candidate',
+          member_name: sub.name, member_doe_id: sub.doeId, member_location: sub.location,
+          member_date: sub.date, member_age: sub.age, member_sex: sub.sex,
+        })
+      }
     }
 
-    // Sort by case_count desc, deduplicate overlapping clusters
+    // Sort by case_count desc
     toInsert.sort((a, b) => (b as { case_count: number }).case_count - (a as { case_count: number }).case_count)
 
     let inserted = 0
@@ -1467,10 +1511,14 @@ export async function POST(req: NextRequest) {
       const { error } = await supabase.from('doe_victimology_clusters' as never).insert(toInsert.slice(i, i + 50) as never)
       if (!error) inserted += Math.min(50, toInsert.length - i)
     }
+    for (let i = 0; i < memberRowsCS.length; i += 200) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRowsCS.slice(i, i + 200) as never)
+    }
 
     return NextResponse.json({
       action: 'circumstance_cluster',
       clustersInserted: inserted,
+      membersInserted: memberRowsCS.length,
       signalsFound: signalToSubmissions.size,
       totalSubmissions: parsed.length,
       casesWithSignals: caseSignals.length,
@@ -1589,23 +1637,37 @@ export async function POST(req: NextRequest) {
     }
 
     const toInsert: object[] = []
+    const memberRowsSD: object[] = []
 
     for (const [key, cases] of weekBuckets) {
       if (cases.length < 2) continue
       const [state] = key.split('_')
       const years = [...new Set(cases.map(c => c.year).filter(Boolean) as number[])]
+      const yearMin = Math.min(...years), yearMax = Math.max(...years)
+      if (yearMax - yearMin > 25) continue // 25-year cap
       const s = cases[0]
+      const clusterId = crypto.randomUUID()
       toInsert.push({
+        id: clusterId,
         case_id: missingCaseId,
-        cluster_label: `${cases.length} cases: ${state}, same week ${s.month ? MONTH_NAMES[s.month] : ''} ${years.length === 1 ? years[0] : `${Math.min(...years)}–${Math.max(...years)}`}`,
+        cluster_label: `${cases.length} cases: ${state}, same week ${s.month ? MONTH_NAMES[s.month] : ''} ${years.length === 1 ? years[0] : `${yearMin}–${yearMax}`}`,
         cluster_type: 'same_date_proximity',
         state,
         case_count: cases.length,
-        year_span_start: Math.min(...years),
-        year_span_end: Math.max(...years),
+        year_span_start: yearMin,
+        year_span_end: yearMax,
         submission_ids: cases.map(c => c.submissionId),
         signals: { pattern: 'same_week', state, month: s.month, years: years.sort() },
       })
+      for (const c of cases) {
+        memberRowsSD.push({
+          cluster_id: clusterId, submission_id: c.submissionId, case_id: missingCaseId,
+          confidence: 0.70, confidence_reason: `Same-week disappearance, ${state}`,
+          membership_status: 'candidate',
+          member_name: c.name, member_doe_id: c.doeId, member_location: c.location,
+          member_date: c.date, member_age: c.age, member_sex: c.sex,
+        })
+      }
     }
 
     for (const [key, cases] of monthBuckets) {
@@ -1614,8 +1676,11 @@ export async function POST(req: NextRequest) {
       const month = parseInt(monthStr)
       const years = [...new Set(cases.map(c => c.year).filter(Boolean) as number[])].sort((a, b) => a - b)
       if (years.length < 2) continue
+      if (years[years.length - 1] - years[0] > 25) continue // 25-year cap
       const season = seasonOf(month)
+      const clusterId = crypto.randomUUID()
       toInsert.push({
+        id: clusterId,
         case_id: missingCaseId,
         cluster_label: `${cases.length} cases: ${state}, ${MONTH_NAMES[month]} disappearances, ${years[0]}–${years[years.length - 1]}`,
         cluster_type: 'same_date_proximity',
@@ -1627,14 +1692,27 @@ export async function POST(req: NextRequest) {
         submission_ids: cases.map(c => c.submissionId),
         signals: { pattern: 'recurring_month', state, month, season, year_count: years.length, years },
       })
+      for (const c of cases) {
+        memberRowsSD.push({
+          cluster_id: clusterId, submission_id: c.submissionId, case_id: missingCaseId,
+          confidence: 0.65, confidence_reason: `Recurring ${MONTH_NAMES[month]} disappearance, ${state}`,
+          membership_status: 'candidate',
+          member_name: c.name, member_doe_id: c.doeId, member_location: c.location,
+          member_date: c.date, member_age: c.age, member_sex: c.sex,
+        })
+      }
     }
 
     toInsert.sort((a, b) =>
       (b as { case_count: number }).case_count - (a as { case_count: number }).case_count)
 
-    // Clear and re-insert
-    await supabase.from('doe_victimology_clusters' as never)
-      .delete().eq('case_id', missingCaseId).eq('cluster_type', 'same_date_proximity')
+    // Clear old clusters and members, then re-insert
+    const { data: oldSD } = await supabase.from('doe_victimology_clusters' as never)
+      .select('id').eq('case_id', missingCaseId).eq('cluster_type', 'same_date_proximity') as { data: Array<{ id: string }> | null }
+    if (oldSD?.length) {
+      await supabase.from('doe_cluster_members' as never).delete().in('cluster_id', oldSD.map(c => c.id))
+      await supabase.from('doe_victimology_clusters' as never).delete().in('id', oldSD.map(c => c.id))
+    }
 
     let inserted = 0
     for (let i = 0; i < toInsert.length; i += 50) {
@@ -1642,8 +1720,11 @@ export async function POST(req: NextRequest) {
         .insert(toInsert.slice(i, i + 50) as never)
       if (!error) inserted += Math.min(50, toInsert.length - i)
     }
+    for (let i = 0; i < memberRowsSD.length; i += 200) {
+      await supabase.from('doe_cluster_members' as never).insert(memberRowsSD.slice(i, i + 200) as never)
+    }
 
-    return NextResponse.json({ action: 'same_date_cluster', clustersInserted: inserted, total: toInsert.length })
+    return NextResponse.json({ action: 'same_date_cluster', clustersInserted: inserted, membersInserted: memberRowsSD.length, total: toInsert.length })
   }
 
   // ── EXTRACT ENTITIES ─────────────────────────────────────────────────────────
@@ -1982,6 +2063,7 @@ export async function POST(req: NextRequest) {
       const years = subs.map(s => s.year).filter(Boolean) as number[]
       const yearMin = years.length ? Math.min(...years) : null
       const yearMax = years.length ? Math.max(...years) : null
+      if (yearMin && yearMax && yearMax - yearMin > 25) continue // 25-year cap
 
       const stateCounts: Record<string, number> = {}
       for (const s of subs) {
@@ -2090,7 +2172,8 @@ export async function POST(req: NextRequest) {
       if (!years.length) continue
       const yearMin = Math.min(...years)
       const yearMax = Math.max(...years)
-      if (yearMax - yearMin < 5) continue // Must span 5+ years to be meaningful
+      if (yearMax - yearMin < 5) continue  // Must span 5+ years to be meaningful
+      if (yearMax - yearMin > 25) continue // Cap at 25 years — unlikely single pattern
 
       const ages    = withAge.map(x => x.midAge)
       const sd      = calcStdDev(ages)
@@ -2186,11 +2269,16 @@ export async function POST(req: NextRequest) {
       await supabase.from('doe_victimology_clusters' as never).delete().in('id', oldIds)
     }
 
-    function extractCity(loc: string | null): string | null {
+    // Extract county (second token) — much denser than city, better anomaly detection
+    function extractCounty(loc: string | null): string | null {
       if (!loc) return null
-      const city = loc.split(',')[0].trim()
-      if (city.length < 3 || /unknown|unclear|various|anywhere/i.test(city)) return null
-      return city
+      const parts = loc.split(',')
+      // "City, County Name, State" → use county (parts[1])
+      // Fall back to city if county absent
+      const county = (parts[1] ?? parts[0] ?? '').trim()
+        .replace(/\s+county$/i, '').replace(/\s+parish$/i, '').trim()
+      if (county.length < 2 || /unknown|unclear|various|anywhere/i.test(county)) return null
+      return county.toLowerCase()
     }
 
     // National demographic rates within this dataset (our null hypothesis)
@@ -2205,22 +2293,22 @@ export async function POST(req: NextRequest) {
     }
     for (const [key, count] of demoRates) demoRates.set(key, count / totalWithDemo)
 
-    // Add city to each record
+    // Add county to each record
     const withCity = parsed
       .filter(p => p.year && normSex(p.sex) && normRace(p.race))
-      .map(p => ({ ...p, city: extractCity(p.location) }))
+      .map(p => ({ ...p, city: extractCounty(p.location) }))
       .filter(p => p.city !== null) as (ParsedCase & { city: string })[]
 
-    // City totals (denominator for expected calculation)
+    // County totals (denominator for expected calculation)
     const cityTotals = new Map<string, number>()
     for (const p of withCity) cityTotals.set(p.city, (cityTotals.get(p.city) ?? 0) + 1)
 
-    // 10-year window buckets: city + sex + race + age_group + decade
+    // 10-year window buckets: county + sex + race + decade (age dropped for density)
     const HOTSPOT_WINDOW = 10
     const buckets = new Map<string, (ParsedCase & { city: string })[]>()
     for (const p of withCity) {
       const decade = Math.floor(p.year! / HOTSPOT_WINDOW) * HOTSPOT_WINDOW
-      const key = `${p.city}|${normSex(p.sex)}|${normRace(p.race)}|${ageGroup(p.age)}|${decade}`
+      const key = `${p.city}|${normSex(p.sex)}|${normRace(p.race)}|${decade}`
       if (!buckets.has(key)) buckets.set(key, [])
       buckets.get(key)!.push(p)
     }
@@ -2229,27 +2317,28 @@ export async function POST(req: NextRequest) {
     const toInsertMembers: object[] = []
 
     for (const [key, subs] of buckets) {
-      if (subs.length < 5) continue
-      const [city, sex, race, ag, decadeStr] = key.split('|')
+      if (subs.length < 2) continue
+      const [city, sex, race, decadeStr] = key.split('|')
       const decade = parseInt(decadeStr)
       const cityTotal = cityTotals.get(city) ?? 0
-      if (cityTotal < 10) continue  // too small a city sample
+      if (cityTotal < 3) continue   // too small a county sample
       const nationalRate = demoRates.get(`${sex}|${race}`) ?? 0
       const expected = cityTotal * nationalRate
-      if (expected < 1) continue
+      if (expected < 0.3) continue
       const anomalyRatio = subs.length / expected
-      if (anomalyRatio < 2.0) continue
+      if (anomalyRatio < 1.5) continue
 
       const years = subs.map(s => s.year).filter(Boolean) as number[]
       const yearMin = Math.min(...years)
       const yearMax = Math.max(...years)
 
-      const ageGroupLabels: Record<string, string> = {
-        child: 'children', teen: 'teens', young_adult: 'young adults',
-        adult: 'adults', middle_age: 'middle-aged adults', senior: 'seniors',
-      }
+      // Summarise age spread for label
+      const ageGroups = [...new Set(subs.map(s => ageGroup(s.age)).filter(a => a !== 'unknown'))]
+      const agLabel = ageGroups.length === 1 ? (ageGroups[0] + 's') : 'mixed age'
+      const ag = ageGroups[0] ?? 'unknown'
+
       const raceLabel = race === 'unknown' ? 'unknown race' : race
-      const label = `${subs.length} ${raceLabel} ${sex} ${ageGroupLabels[ag] ?? ag} · ${city} · ${decade}s · ${anomalyRatio.toFixed(1)}× expected`
+      const label = `${subs.length} ${raceLabel} ${sex} ${agLabel} · ${city} County · ${decade}s · ${anomalyRatio.toFixed(1)}× expected`
 
       const clusterId = crypto.randomUUID()
 
@@ -2278,7 +2367,8 @@ export async function POST(req: NextRequest) {
         case_count: subs.length,
         submission_ids: subs.map(s => s.submissionId),
         signals: {
-          city,
+          city,   // this is actually county name now
+          county: city,
           anomaly_ratio: parseFloat(anomalyRatio.toFixed(2)),
           expected_count: parseFloat(expected.toFixed(1)),
           observed_count: subs.length,
@@ -2293,6 +2383,7 @@ export async function POST(req: NextRequest) {
       for (const sub of subs) {
         toInsertMembers.push({
           cluster_id: clusterId,
+          case_id: missingCaseId,
           submission_id: sub.submissionId,
           confidence: Math.min(0.99, parseFloat((0.4 + Math.min(anomalyRatio / 10, 0.59)).toFixed(2))),
           confidence_reason: `${anomalyRatio.toFixed(1)}× expected rate — ${subs.length} ${race} ${sex} in ${city} (${decade}s vs ${nationalRate > 0 ? (nationalRate * 100).toFixed(0) : '?'}% national rate)`,
@@ -2330,7 +2421,7 @@ export async function POST(req: NextRequest) {
       clustersInserted: insertedClusters,
       membersInserted: toInsertMembers.length,
       totalCasesAnalyzed: withCity.length,
-      anomalyThreshold: '2.0×',
+      anomalyThreshold: '1.5×',
     })
   }
 
@@ -2388,6 +2479,7 @@ export async function POST(req: NextRequest) {
       const years = unique.map(s => s.year).filter(Boolean) as number[]
       const yearMin = years.length ? Math.min(...years) : null
       const yearMax = years.length ? Math.max(...years) : null
+      if (yearMin && yearMax && yearMax - yearMin > 25) continue // 25-year cap
 
       const stateCounts: Record<string, number> = {}
       for (const s of unique) if (s.state) stateCounts[s.state] = (stateCounts[s.state] ?? 0) + 1
@@ -2519,6 +2611,7 @@ export async function POST(req: NextRequest) {
       const years = unique.map(s => s.year).filter(Boolean) as number[]
       const yearMin = years.length ? Math.min(...years) : null
       const yearMax = years.length ? Math.max(...years) : null
+      if (yearMin && yearMax && yearMax - yearMin > 25) continue // 25-year cap
 
       const stateCounts: Record<string, number> = {}
       for (const s of unique) if (s.state) stateCounts[s.state] = (stateCounts[s.state] ?? 0) + 1
