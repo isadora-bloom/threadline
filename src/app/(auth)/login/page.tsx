@@ -31,10 +31,13 @@ export default function LoginPage() {
 
     setLoading(false)
     if (error) {
+      const msg = error.message
       setError(
-        error.message === 'Invalid login credentials'
+        msg === 'Invalid login credentials'
           ? 'Incorrect email or password.'
-          : error.message
+          : (!msg || msg === '{}' || msg === 'Failed to fetch')
+          ? 'Unable to connect. Please try again in a moment.'
+          : msg
       )
     } else {
       window.location.href = '/'
@@ -53,7 +56,7 @@ export default function LoginPage() {
     })
 
     setLoading(false)
-    if (error) setError(error.message)
+    if (error) setError(!error.message || error.message === '{}' ? 'Unable to connect. Please try again in a moment.' : error.message)
     else setSent(true)
   }
 
@@ -68,7 +71,7 @@ export default function LoginPage() {
     })
 
     setLoading(false)
-    if (error) setError(error.message)
+    if (error) setError(!error.message || error.message === '{}' ? 'Unable to connect. Please try again in a moment.' : error.message)
     else setSent(true)
   }
 
