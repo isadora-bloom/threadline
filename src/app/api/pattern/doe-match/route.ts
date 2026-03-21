@@ -1350,6 +1350,60 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── MANUAL LINK ──────────────────────────────────────────────────────────────
+  if (action === 'manual_link') {
+    const { missingSubmissionId, unidentifiedSubmissionId, unidentifiedCaseId: unidCaseId } = body
+    if (!missingSubmissionId || !unidentifiedSubmissionId) {
+      return NextResponse.json({ error: 'missingSubmissionId and unidentifiedSubmissionId required' }, { status: 400 })
+    }
+
+    const [{ data: mRow }, { data: uRow }] = await Promise.all([
+      supabase.from('submissions' as never).select('id, raw_text, notes').eq('id', missingSubmissionId as never).single() as unknown as Promise<{ data: { id: string; raw_text: string; notes: string | null } | null }>,
+      supabase.from('submissions' as never).select('id, raw_text, notes').eq('id', unidentifiedSubmissionId as never).single() as unknown as Promise<{ data: { id: string; raw_text: string; notes: string | null } | null }>,
+    ])
+    if (!mRow || !uRow) return NextResponse.json({ error: 'Submission not found' }, { status: 404 })
+
+    const mp = parseSubmission(mRow)
+    const up = parseSubmission(uRow)
+
+    const { error } = await supabase.from('doe_match_candidates' as never).upsert({
+      missing_submission_id:      missingSubmissionId,
+      unidentified_submission_id: unidentifiedSubmissionId,
+      missing_case_id:            missingCaseId,
+      unidentified_case_id:       unidCaseId ?? null,
+      composite_score:            999,
+      grade:                      'manual',
+      signals:                    { manual: true },
+      match_type:                 'manual_link',
+      reviewer_status:            'confirmed',
+      missing_doe_id:             mp.doeId,
+      missing_name:               mp.name,
+      missing_sex:                mp.sex,
+      missing_race:               mp.race,
+      missing_age:                mp.age,
+      missing_location:           mp.location,
+      missing_date:               mp.date,
+      missing_hair:               mp.hair,
+      missing_eyes:               mp.eyes,
+      missing_marks:              mp.marks,
+      unidentified_doe_id:        up.doeId,
+      unidentified_sex:           up.sex,
+      unidentified_race:          up.race,
+      unidentified_age:           up.age,
+      unidentified_location:      up.location,
+      unidentified_date:          up.date,
+      unidentified_hair:          up.hair,
+      unidentified_eyes:          up.eyes,
+      unidentified_marks:         up.marks,
+    } as never, {
+      onConflict: 'missing_submission_id,unidentified_submission_id',
+      ignoreDuplicates: false,
+    })
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, action: 'manual_link' })
+  }
+
   // ── CROSS MATCH ──────────────────────────────────────────────────────────────
   if (action === 'cross_match') {
     if (!unidentifiedCaseId) return NextResponse.json({ error: 'unidentifiedCaseId required' }, { status: 400 })
@@ -3193,6 +3247,43 @@ export async function GET(req: NextRequest) {
     const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ entities: data, total: count, page })
+  }
+
+  if (type === 'compare_cases') {
+    const rawIds = params.get('submissionIds') ?? ''
+    const ids = rawIds.split(',').map(s => s.trim()).filter(Boolean).slice(0, 6)
+    if (!ids.length) return NextResponse.json({ error: 'submissionIds required' }, { status: 400 })
+    const unidCaseId = params.get('unidentifiedCaseId')
+
+    const { data, error } = await supabase
+      .from('submissions' as never)
+      .select('id, raw_text, notes, case_id')
+      .in('id', ids as never) as { data: Array<{ id: string; raw_text: string; notes: string | null; case_id: string }> | null; error: { message: string } | null }
+
+    if (error) return NextResponse.json({ error: 'DB error' }, { status: 500 })
+
+    const cases = (data ?? []).map(row => {
+      const p = parseSubmission({ id: row.id, raw_text: row.raw_text, notes: row.notes })
+      return {
+        submissionId: row.id,
+        caseType: (row.case_id === unidCaseId ? 'unidentified' : 'missing') as 'missing' | 'unidentified',
+        doeId:        p.doeId,
+        name:         p.name,
+        sex:          p.sex,
+        race:         p.race,
+        age:          p.age,
+        height:       p.height,
+        weight:       p.weight,
+        hair:         p.hair,
+        eyes:         p.eyes,
+        marks:        p.marks,
+        jewelry:      p.jewelry,
+        date:         p.date,
+        location:     p.location,
+        circumstances: p.circumstances,
+      }
+    })
+    return NextResponse.json({ cases })
   }
 
   // Tattoo/mark keyword search — returns missing persons + unidentified remains that share the keyword

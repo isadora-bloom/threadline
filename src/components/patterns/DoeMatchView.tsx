@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo, type ComponentType } from 'react'
+import { useState, useCallback, useMemo, useEffect, type ComponentType } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -16,7 +16,7 @@ import {
   CheckCircle, XCircle, Clock, RefreshCw, Sparkles,
   User, MapPin, Calendar, Eye, Scissors, Scale, Ruler,
   Skull, Flame, Brain, Car, UserX, Search, ShieldAlert,
-  Fingerprint, Globe, ExternalLink, ArrowUpDown,
+  Fingerprint, Globe, ExternalLink, ArrowUpDown, X,
 } from 'lucide-react'
 
 interface AiAssessment {
@@ -65,6 +65,25 @@ interface DoeMatchCandidate {
   destination_city:  string | null
   destination_state: string | null
   match_type:        string | null
+}
+
+interface ComparedCase {
+  submissionId: string
+  caseType: 'missing' | 'unidentified'
+  doeId: string | null
+  name: string | null
+  sex: string | null
+  race: string | null
+  age: string | null
+  height: string | null
+  weight: string | null
+  hair: string | null
+  eyes: string | null
+  marks: string | null
+  jewelry: string | null
+  date: string | null
+  location: string | null
+  circumstances: string | null
 }
 
 interface DoeCluster {
@@ -1376,6 +1395,174 @@ function EntityCard({ entity }: { entity: DoeEntityMention }) {
   )
 }
 
+// ─── Case comparison modal ────────────────────────────────────────────────────
+
+function CaseComparisonModal({
+  open, onClose, unidentifiedId, missingIds, missingCaseId, unidentifiedCaseId, onLink, linkedIds,
+}: {
+  open: boolean
+  onClose: () => void
+  unidentifiedId: string | null
+  missingIds: string[]
+  missingCaseId: string
+  unidentifiedCaseId: string | null
+  onLink: (missingId: string) => Promise<void>
+  linkedIds: Set<string>
+}) {
+  const [cases, setCases] = useState<ComparedCase[]>([])
+  const [loading, setLoading] = useState(false)
+  const [linking, setLinking] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || !unidentifiedId || !missingIds.length) return
+    const ids = [...missingIds, unidentifiedId].join(',')
+    setLoading(true)
+    const p = new URLSearchParams({ missingCaseId, type: 'compare_cases', submissionIds: ids })
+    if (unidentifiedCaseId) p.set('unidentifiedCaseId', unidentifiedCaseId)
+    fetch(`/api/pattern/doe-match?${p}`)
+      .then(r => r.json())
+      .then((d: { cases: ComparedCase[] }) => setCases(d.cases ?? []))
+      .finally(() => setLoading(false))
+  }, [open, unidentifiedId, missingIds.join(','), missingCaseId, unidentifiedCaseId])
+
+  if (!open) return null
+
+  const unidCase  = cases.find(c => c.caseType === 'unidentified')
+  const missCases = cases.filter(c => c.caseType === 'missing')
+
+  // Color-code a row based on whether values match/conflict
+  function rowClass(unidVal: string | null, missVal: string | null): string {
+    if (!unidVal || !missVal) return 'bg-slate-50'
+    const u = unidVal.toLowerCase().trim()
+    const m = missVal.toLowerCase().trim()
+    if (u === m || u.includes(m) || m.includes(u)) return 'bg-green-50'
+    return 'bg-red-50'
+  }
+
+  const FIELDS: Array<{ label: string; key: keyof ComparedCase }> = [
+    { label: 'DOE ID / NamUs',  key: 'doeId' },
+    { label: 'Name',            key: 'name' },
+    { label: 'Sex',             key: 'sex' },
+    { label: 'Race',            key: 'race' },
+    { label: 'Age',             key: 'age' },
+    { label: 'Height',          key: 'height' },
+    { label: 'Weight',          key: 'weight' },
+    { label: 'Hair',            key: 'hair' },
+    { label: 'Eyes',            key: 'eyes' },
+    { label: 'Marks / Tattoos', key: 'marks' },
+    { label: 'Jewelry',         key: 'jewelry' },
+    { label: 'Date',            key: 'date' },
+    { label: 'Location',        key: 'location' },
+    { label: 'Circumstances',   key: 'circumstances' },
+  ]
+
+  async function handleLink(missId: string) {
+    setLinking(missId)
+    try { await onLink(missId) } finally { setLinking(null) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl my-4" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Side-by-side comparison</h2>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Green = values match · Red = values conflict · Grey = one side unknown
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="py-16 text-center"><Loader2 className="h-6 w-6 animate-spin text-slate-300 mx-auto" /></div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="text-left px-3 py-2 text-slate-400 font-medium w-28 sticky left-0 bg-white">Field</th>
+                  {/* Unidentified column */}
+                  {unidCase && (
+                    <th className="px-3 py-2 text-left min-w-[180px]">
+                      <div className="bg-amber-100 border border-amber-200 rounded px-2 py-1.5">
+                        <p className="text-[9px] text-amber-600 font-semibold uppercase tracking-wide">Unidentified remains</p>
+                        <p className="text-xs font-bold text-slate-800 mt-0.5">{unidCase.doeId ?? 'Unknown ID'}</p>
+                        {unidCase.sex && <p className="text-[10px] text-slate-500">{unidCase.sex} · {unidCase.race} · {unidCase.age}</p>}
+                      </div>
+                    </th>
+                  )}
+                  {/* Missing person columns */}
+                  {missCases.map(mc => (
+                    <th key={mc.submissionId} className="px-3 py-2 text-left min-w-[180px]">
+                      <div className="bg-blue-50 border border-blue-200 rounded px-2 py-1.5">
+                        <p className="text-[9px] text-blue-500 font-semibold uppercase tracking-wide">Missing person</p>
+                        <p className="text-xs font-bold text-slate-800 mt-0.5">{mc.name ?? 'Unknown'}</p>
+                        {mc.doeId && <p className="text-[10px] font-mono text-indigo-400">{mc.doeId}</p>}
+                        <div className="mt-1.5">
+                          {linkedIds.has(mc.submissionId) ? (
+                            <span className="inline-flex items-center gap-1 text-[9px] bg-green-100 text-green-700 border border-green-200 rounded px-1.5 py-0.5 font-semibold">
+                              <CheckCircle className="h-2.5 w-2.5" />Linked
+                            </span>
+                          ) : (
+                            <button
+                              disabled={!unidentifiedId || linking === mc.submissionId}
+                              onClick={() => handleLink(mc.submissionId)}
+                              className="inline-flex items-center gap-1 text-[9px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded px-2 py-0.5 font-semibold transition-colors"
+                            >
+                              {linking === mc.submissionId
+                                ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                : <GitMerge className="h-2.5 w-2.5" />}
+                              Link to remains
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {FIELDS.map(({ label, key }) => (
+                  <tr key={key} className="border-b border-slate-50 hover:bg-slate-50/50">
+                    <td className="px-3 py-1.5 text-slate-400 font-medium sticky left-0 bg-white">{label}</td>
+                    {unidCase && (
+                      <td className="px-3 py-1.5 text-slate-700 bg-amber-50/30">
+                        <span className="line-clamp-3">{(unidCase[key] as string) || <span className="text-slate-300 italic">—</span>}</span>
+                      </td>
+                    )}
+                    {missCases.map(mc => {
+                      const cellClass = key !== 'name' && key !== 'circumstances' && key !== 'doeId'
+                        ? rowClass(unidCase?.[key] as string ?? null, mc[key] as string ?? null)
+                        : ''
+                      return (
+                        <td key={mc.submissionId} className={`px-3 py-1.5 text-slate-700 ${cellClass}`}>
+                          <span className="line-clamp-3">{(mc[key] as string) || <span className="text-slate-300 italic">—</span>}</span>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
+          <p className="text-[10px] text-slate-400">
+            Linking creates a confirmed match candidate visible in the Matches tab.
+            All links require investigator review before any external action.
+          </p>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
@@ -1432,6 +1619,10 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     unidentified: Array<{ submissionId: string; doeId: string | null; name: string | null; sex: string | null; race: string | null; age: string | null; date: string | null; state: string | null; snippet: string | null }>
   } | null>(null)
   const [tattooSearching, setTattooSearching] = useState(false)
+  const [selectedMissingIds, setSelectedMissingIds] = useState<Set<string>>(new Set())
+  const [selectedUnidentifiedId, setSelectedUnidentifiedId] = useState<string | null>(null)
+  const [compareOpen, setCompareOpen] = useState(false)
+  const [linkedIds, setLinkedIds] = useState<Set<string>>(new Set())
 
   const supabase = createClient()
 
@@ -1888,6 +2079,23 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     }
   }
 
+  async function linkCases(missingSubmissionId: string) {
+    if (!selectedUnidentifiedId) return
+    await fetch('/api/pattern/doe-match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'manual_link',
+        missingCaseId: effectiveCaseId,
+        unidentifiedCaseId: doeCases?.unidentified ?? null,
+        missingSubmissionId,
+        unidentifiedSubmissionId: selectedUnidentifiedId,
+      }),
+    })
+    setLinkedIds(prev => new Set([...prev, missingSubmissionId]))
+    queryClient.invalidateQueries({ queryKey: ['doe-matches', effectiveCaseId] })
+  }
+
   const allMatches = matchQuery.data?.matches ?? []
   const matches = allMatches
     .filter(m => signalCountFilter === 0 || countPositiveSignals(m.signals) >= signalCountFilter)
@@ -2287,21 +2495,38 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                       ) : (
                         <div className="space-y-1.5">
                           {tattooResults.missing.map(r => (
-                            <div key={r.submissionId} className="text-[10px] bg-blue-50 border border-blue-100 rounded p-2">
-                              <div className="flex items-center gap-1 flex-wrap">
-                                <span className="font-semibold text-slate-800">{r.name ?? 'Unknown'}</span>
-                                {r.doeId && <span className="font-mono text-indigo-400">{r.doeId}</span>}
-                                {r.sex && <span className="text-slate-500">{r.sex}</span>}
-                                {r.race && <span className="text-slate-500">{r.race}</span>}
-                                {r.age && <span className="text-slate-500">age {r.age}</span>}
-                                {r.state && <span className="text-slate-500">{r.state}</span>}
-                                {r.date && <span className="text-slate-400">{r.date}</span>}
-                                <a href={`/cases/${effectiveCaseId}/submissions/${r.submissionId}`} target="_blank" rel="noopener noreferrer"
-                                  className="ml-auto text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 font-medium">
-                                  <ExternalLink className="h-2 w-2" />View
-                                </a>
+                            <div key={r.submissionId}
+                              className={`text-[10px] border rounded p-2 cursor-pointer transition-colors ${selectedMissingIds.has(r.submissionId) ? 'bg-blue-100 border-blue-300' : 'bg-blue-50 border-blue-100 hover:border-blue-200'}`}
+                              onClick={() => setSelectedMissingIds(prev => {
+                                const next = new Set(prev)
+                                next.has(r.submissionId) ? next.delete(r.submissionId) : (next.size < 3 && next.add(r.submissionId))
+                                return next
+                              })}
+                            >
+                              <div className="flex items-start gap-2">
+                                <input type="checkbox" readOnly
+                                  checked={selectedMissingIds.has(r.submissionId)}
+                                  disabled={!selectedMissingIds.has(r.submissionId) && selectedMissingIds.size >= 3}
+                                  className="mt-0.5 accent-blue-500 cursor-pointer"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <span className="font-semibold text-slate-800">{r.name ?? 'Unknown'}</span>
+                                    {r.doeId && <span className="font-mono text-indigo-400">{r.doeId}</span>}
+                                    {r.sex && <span className="text-slate-500">{r.sex}</span>}
+                                    {r.race && <span className="text-slate-500">{r.race}</span>}
+                                    {r.age && <span className="text-slate-500">age {r.age}</span>}
+                                    {r.state && <span className="text-slate-500">{r.state}</span>}
+                                    {r.date && <span className="text-slate-400">{r.date}</span>}
+                                    <a href={`/cases/${effectiveCaseId}/submissions/${r.submissionId}`} target="_blank" rel="noopener noreferrer"
+                                      className="ml-auto text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 font-medium"
+                                      onClick={e => e.stopPropagation()}>
+                                      <ExternalLink className="h-2 w-2" />View
+                                    </a>
+                                  </div>
+                                  {r.snippet && <p className="mt-0.5 text-slate-500 italic">…{r.snippet}…</p>}
+                                </div>
                               </div>
-                              {r.snippet && <p className="mt-0.5 text-slate-500 italic">…{r.snippet}…</p>}
                             </div>
                           ))}
                         </div>
@@ -2316,22 +2541,34 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                       ) : (
                         <div className="space-y-1.5">
                           {tattooResults.unidentified.map(r => (
-                            <div key={r.submissionId} className="text-[10px] bg-amber-50 border border-amber-100 rounded p-2">
-                              <div className="flex items-center gap-1 flex-wrap">
-                                <span className="font-semibold text-slate-800">{r.doeId ?? 'Unknown ID'}</span>
-                                {r.sex && <span className="text-slate-500">{r.sex}</span>}
-                                {r.race && <span className="text-slate-500">{r.race}</span>}
-                                {r.age && <span className="text-slate-500">age {r.age}</span>}
-                                {r.state && <span className="text-slate-500">{r.state}</span>}
-                                {r.date && <span className="text-slate-400">{r.date}</span>}
-                                {doeCases?.unidentified && (
-                                  <a href={`/cases/${doeCases.unidentified}/submissions/${r.submissionId}`} target="_blank" rel="noopener noreferrer"
-                                    className="ml-auto text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 font-medium">
-                                    <ExternalLink className="h-2 w-2" />View
-                                  </a>
-                                )}
+                            <div key={r.submissionId}
+                              className={`text-[10px] border rounded p-2 cursor-pointer transition-colors ${selectedUnidentifiedId === r.submissionId ? 'bg-amber-100 border-amber-400' : 'bg-amber-50 border-amber-100 hover:border-amber-300'}`}
+                              onClick={() => setSelectedUnidentifiedId(prev => prev === r.submissionId ? null : r.submissionId)}
+                            >
+                              <div className="flex items-start gap-2">
+                                <input type="radio" readOnly
+                                  checked={selectedUnidentifiedId === r.submissionId}
+                                  className="mt-0.5 accent-amber-500 cursor-pointer"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <span className="font-semibold text-slate-800">{r.doeId ?? 'Unknown ID'}</span>
+                                    {r.sex && <span className="text-slate-500">{r.sex}</span>}
+                                    {r.race && <span className="text-slate-500">{r.race}</span>}
+                                    {r.age && <span className="text-slate-500">age {r.age}</span>}
+                                    {r.state && <span className="text-slate-500">{r.state}</span>}
+                                    {r.date && <span className="text-slate-400">{r.date}</span>}
+                                    {doeCases?.unidentified && (
+                                      <a href={`/cases/${doeCases.unidentified}/submissions/${r.submissionId}`} target="_blank" rel="noopener noreferrer"
+                                        className="ml-auto text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 font-medium"
+                                        onClick={e => e.stopPropagation()}>
+                                        <ExternalLink className="h-2 w-2" />View
+                                      </a>
+                                    )}
+                                  </div>
+                                  {r.snippet && <p className="mt-0.5 text-slate-500 italic">…{r.snippet}…</p>}
+                                </div>
                               </div>
-                              {r.snippet && <p className="mt-0.5 text-slate-500 italic">…{r.snippet}…</p>}
                             </div>
                           ))}
                         </div>
@@ -2339,9 +2576,32 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                     </div>
                   </div>
                   {(tattooResults.missing.length > 0 && tattooResults.unidentified.length > 0) && (
-                    <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                      <strong>{tattooResults.missing.length} missing person{tattooResults.missing.length !== 1 ? 's' : ''}</strong> and <strong>{tattooResults.unidentified.length} unidentified case{tattooResults.unidentified.length !== 1 ? 's' : ''}</strong> both mention <strong>"{tattooResults.keyword}"</strong>. Review each record to check demographic compatibility before drawing conclusions.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                        <strong>{tattooResults.missing.length} missing person{tattooResults.missing.length !== 1 ? 's' : ''}</strong> and <strong>{tattooResults.unidentified.length} unidentified case{tattooResults.unidentified.length !== 1 ? 's' : ''}</strong> both mention <strong>"{tattooResults.keyword}"</strong>. Tick a remains (radio) and up to 3 missing persons (checkboxes) then compare.
+                      </p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {(selectedMissingIds.size > 0 || selectedUnidentifiedId) && (
+                          <button className="text-[10px] text-slate-400 hover:text-slate-600 underline"
+                            onClick={() => { setSelectedMissingIds(new Set()); setSelectedUnidentifiedId(null) }}>
+                            Clear selection
+                          </button>
+                        )}
+                        {selectedMissingIds.size > 0 && selectedUnidentifiedId && (
+                          <Button size="sm" className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                            onClick={() => setCompareOpen(true)}>
+                            <GitMerge className="h-3 w-3 mr-1" />
+                            Compare {selectedMissingIds.size} missing + 1 remains
+                          </Button>
+                        )}
+                        {selectedMissingIds.size > 0 && !selectedUnidentifiedId && (
+                          <p className="text-[10px] text-slate-400 italic">← Select a remains to compare</p>
+                        )}
+                        {selectedUnidentifiedId && selectedMissingIds.size === 0 && (
+                          <p className="text-[10px] text-slate-400 italic">← Select 1–3 missing persons to compare</p>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
@@ -2687,6 +2947,16 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
           )}
         </>
       )}
+      <CaseComparisonModal
+        open={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        unidentifiedId={selectedUnidentifiedId}
+        missingIds={[...selectedMissingIds]}
+        missingCaseId={effectiveCaseId}
+        unidentifiedCaseId={doeCases?.unidentified ?? null}
+        onLink={linkCases}
+        linkedIds={linkedIds}
+      />
     </div>
   )
 }
