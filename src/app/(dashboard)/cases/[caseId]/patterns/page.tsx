@@ -15,6 +15,7 @@ import { CaseLinkageView } from '@/components/patterns/CaseLinkageView'
 import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads'
 import { ResearchTaskList } from '@/components/research/ResearchTaskList'
 import { DoeMatchView } from '@/components/patterns/DoeMatchView'
+import { GeoView } from '@/components/patterns/GeoView'
 import { useToast } from '@/components/ui/use-toast'
 import { useParams } from 'next/navigation'
 import {
@@ -31,6 +32,7 @@ import {
   Sparkles,
   Microscope,
   GitMerge,
+  Globe,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
@@ -254,7 +256,7 @@ export default function PatternIntelligencePage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         {roleLoaded && (
-        <TabsList className={`grid w-full max-w-4xl ${canRunAnalysis ? 'grid-cols-8' : 'grid-cols-7'}`}>
+        <TabsList className={`grid w-full max-w-4xl ${canRunAnalysis ? 'grid-cols-9' : 'grid-cols-8'}`}>
           <TabsTrigger value="flags" className="text-xs">
             <Flag className="h-3.5 w-3.5 mr-1" />
             Flags
@@ -294,6 +296,10 @@ export default function PatternIntelligencePage() {
             <GitMerge className="h-3.5 w-3.5 mr-1" />
             Match
           </TabsTrigger>
+          <TabsTrigger value="geo" className="text-xs">
+            <Globe className="h-3.5 w-3.5 mr-1" />
+            Geographic
+          </TabsTrigger>
         </TabsList>
         )}
 
@@ -329,6 +335,10 @@ export default function PatternIntelligencePage() {
 
         <TabsContent value="doe-match" className="mt-4">
           <DoeMatchView caseId={caseId} canManage={canRunAnalysis} />
+        </TabsContent>
+
+        <TabsContent value="geo" className="mt-4">
+          <GeoView caseId={caseId} />
         </TabsContent>
       </Tabs>
     </div>

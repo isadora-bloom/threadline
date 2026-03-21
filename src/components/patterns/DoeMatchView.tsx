@@ -904,12 +904,7 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                         <Calendar className="h-2.5 w-2.5 mr-0.5" />{cluster.temporal_pattern} pattern
                       </Badge>
                     )}
-                    {hasMembers && (
-                      <Badge className="text-[9px] bg-slate-50 text-slate-400 border-slate-200">
-                        members tracked
-                      </Badge>
-                    )}
-                    {cluster.ai_narrative && (
+                      {cluster.ai_narrative && (
                       <Badge className="text-[10px] bg-violet-50 text-violet-600 border-violet-200">
                         <Brain className="h-2.5 w-2.5 mr-0.5" />AI analysis
                       </Badge>
@@ -929,6 +924,30 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                   {open ? <ChevronUp className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
                 </div>
               </div>
+
+              {/* Clear CTA to expand cases */}
+              {hasMembers && (
+                <div className="mt-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-colors
+                      ${open
+                        ? 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200'
+                        : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200'
+                      }`}
+                    onClick={e => { e.stopPropagation(); handleOpenChange(!open) }}
+                  >
+                    <span>
+                      {open ? <ChevronUp className="h-3.5 w-3.5 inline mr-1" /> : <ChevronDown className="h-3.5 w-3.5 inline mr-1" />}
+                      {open ? 'Hide cases' : `↓ View ${cluster.case_count} case${cluster.case_count !== 1 ? 's' : ''} in this cluster`}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="font-black text-sm">{cluster.case_count}</span>
+                      <span className="font-normal opacity-70">cases</span>
+                    </span>
+                  </button>
+                </div>
+              )}
             </CardContent>
           </button>
         </CollapsibleTrigger>
