@@ -100,12 +100,22 @@ async function main() {
   const missingCaseId = cases[0].id
   console.log(`Case:  ${cases[0].title}`)
 
-  // Fetch all submissions and extract unique city+state combos
+  // Fetch all submissions (paginated — PostgREST caps at 1 000 rows by default)
   console.log('\nLoading submissions…')
-  const { data: subs } = await supabase
-    .from('submissions').select('raw_text').eq('case_id', missingCaseId)
+  const subs: Array<{ raw_text: string }> = []
+  let from = 0
+  const PAGE = 1000
+  while (true) {
+    const { data, error } = await supabase
+      .from('submissions').select('raw_text').eq('case_id', missingCaseId)
+      .range(from, from + PAGE - 1)
+    if (error || !data?.length) break
+    subs.push(...data)
+    if (data.length < PAGE) break
+    from += PAGE
+  }
 
-  if (!subs?.length) { console.error('No submissions found.'); process.exit(1) }
+  if (!subs.length) { console.error('No submissions found.'); process.exit(1) }
   console.log(`Submissions loaded: ${subs.length.toLocaleString()}`)
 
   const unique = new Map<string, { city: string; state: string }>()
