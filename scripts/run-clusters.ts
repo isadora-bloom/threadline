@@ -93,6 +93,11 @@ const CLUSTER_STEPS: Array<{
     label: 'Demographic hotspot (anomaly)',
     description: 'City × decade × demographic combinations with ≥2× expected rate',
   },
+  {
+    action: 'destination_route_match',
+    label: 'Destination route match',
+    description: 'Score unidentified remains in stated destination state against full physical description',
+  },
 ]
 
 // ─── API caller ────────────────────────────────────────────────────────────────
@@ -100,6 +105,7 @@ const CLUSTER_STEPS: Array<{
 async function callCluster(
   action: string,
   missingCaseId: string,
+  extraBody?: Record<string, string>,
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`${BASE_URL}/api/pattern/doe-match`, {
     method: 'POST',
@@ -107,7 +113,7 @@ async function callCluster(
       'Content-Type': 'application/json',
       'X-Internal-Key': SERVICE_KEY,
     },
-    body: JSON.stringify({ action, missingCaseId }),
+    body: JSON.stringify({ action, missingCaseId, ...extraBody }),
   })
 
   if (!res.ok) {
@@ -159,21 +165,26 @@ async function main() {
   if (ONLY_ARG) console.log(`Filter:  ${[...ONLY_ARG].join(', ')}`)
   console.log()
 
-  // Find the missing persons case
-  const { data: cases } = await supabase
+  // Find both Doe Network cases
+  const { data: allDoe } = await supabase
     .from('cases')
     .select('id, title')
-    .ilike('title', '%Doe Network%Missing%')
+    .ilike('title', '%Doe Network%')
 
-  if (!cases?.length) {
+  const missingCase     = allDoe?.find(c => /missing/i.test(c.title))
+  const unidentifiedCase = allDoe?.find(c => /unidentified/i.test(c.title))
+
+  if (!missingCase) {
     console.error('Could not find "Doe Network Import — Missing Persons" case.')
     console.error('Run the import script first, or check your Supabase connection.')
     process.exit(1)
   }
 
-  const missingCaseId = cases[0].id
-  console.log(`Case:  ${cases[0].title}`)
+  const missingCaseId      = missingCase.id
+  const unidentifiedCaseId = unidentifiedCase?.id ?? null
+  console.log(`Case:  ${missingCase.title}`)
   console.log(`ID:    ${missingCaseId}`)
+  if (unidentifiedCaseId) console.log(`Unid:  ${unidentifiedCase!.title}`)
 
   // Count submissions so we know the dataset size
   const { count: subCount } = await supabase
@@ -204,7 +215,13 @@ async function main() {
 
     const t0 = Date.now()
     try {
-      const result = await callCluster(step.action, missingCaseId)
+      const extra = step.action === 'destination_route_match' && unidentifiedCaseId
+        ? { unidentifiedCaseId }
+        : undefined
+      if (step.action === 'destination_route_match' && !unidentifiedCaseId) {
+        throw new Error('Unidentified case not found — skipping')
+      }
+      const result = await callCluster(step.action, missingCaseId, extra)
       const ms = Date.now() - t0
       const summary = summarise(step.action, result)
       console.log(`✓  ${summary}  (${ms}ms)`)

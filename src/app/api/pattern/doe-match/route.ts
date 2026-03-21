@@ -27,7 +27,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 
-export const maxDuration = 60
+export const maxDuration = 300
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -719,13 +719,31 @@ function buildJewelryTokens(text: string): Set<string> {
 function scoreTattoos(a: ParsedCase, b: ParsedCase): SignalResult & { keywords: string[] } {
   const mText = (a.marks ?? '').toLowerCase()
   const uText = (b.marks ?? '').toLowerCase()
-  const mMotifs = mText.includes('tattoo') ? TATTOO_IMAGERY.filter(t => mText.includes(t)) : []
-  const uMotifs = uText.includes('tattoo') ? TATTOO_IMAGERY.filter(t => uText.includes(t)) : []
+
+  const mHasTattoo = mText.includes('tattoo') || mText.includes('tatoo')
+  const uHasTattoo = uText.includes('tattoo') || uText.includes('tatoo')
+
+  // Explicit contradictions — one side confirms no tattoos
+  const mNoTattoo = /no (known |visible )?tattoo|no tattoo/i.test(mText)
+  const uNoTattoo = /no (known |visible )?tattoo|no tattoo/i.test(uText)
+  if ((mHasTattoo && uNoTattoo) || (uHasTattoo && mNoTattoo)) {
+    return { score: -15, match: 'contradiction', keywords: [] }
+  }
+
+  const mMotifs = mHasTattoo ? TATTOO_IMAGERY.filter(t => mText.includes(t)) : []
+  const uMotifs = uHasTattoo ? TATTOO_IMAGERY.filter(t => uText.includes(t)) : []
   const shared = mMotifs.filter(t => uMotifs.includes(t))
-  const score = shared.length >= 3 ? 15 : shared.length >= 2 ? 10 : shared.length >= 1 ? 5 : 0
-  const match = shared.length >= 3 ? 'strong_match' : shared.length >= 2 ? 'partial_match' : shared.length >= 1 ? 'possible_match'
-    : mMotifs.length > 0 && uMotifs.length > 0 ? 'both_have_tattoos'
-    : !mText.includes('tattoo') && !uText.includes('tattoo') ? 'none_mentioned' : 'one_side_only'
+
+  // Reward shared specific imagery
+  const score = shared.length >= 3 ? 20 : shared.length >= 2 ? 14 : shared.length >= 1 ? 8
+    : mHasTattoo && uHasTattoo ? 3   // both tattooed, no imagery overlap
+    : !mHasTattoo && !uHasTattoo ? 0  // neither mentioned
+    : 0                               // one has, one doesn't (not explicit contradiction)
+
+  const match = shared.length >= 3 ? 'strong_match' : shared.length >= 2 ? 'partial_match'
+    : shared.length >= 1 ? 'possible_match'
+    : mHasTattoo && uHasTattoo ? 'both_have_tattoos'
+    : !mHasTattoo && !uHasTattoo ? 'none_mentioned' : 'one_side_only'
   return { score, match, keywords: shared }
 }
 
@@ -735,7 +753,22 @@ function scoreBodyMarks(a: ParsedCase, b: ParsedCase): SignalResult & { keywords
   const mMarks = BODY_MARK_KW.filter(k => mText.includes(k))
   const uMarks = BODY_MARK_KW.filter(k => uText.includes(k))
   const shared = mMarks.filter(k => uMarks.includes(k))
-  const score = shared.length > 0 ? Math.min(8, shared.length * 4) : 0
+
+  // Explicit scar contradiction — one has a specific scar, the other has no scars
+  const mNoScars = /no (known |visible )?scars?|no marks/i.test(mText)
+  const uNoScars = /no (known |visible )?scars?|no marks/i.test(uText)
+  const mHasSpecific = mMarks.length > 0
+  const uHasSpecific = uMarks.length > 0
+  if ((mHasSpecific && uNoScars) || (uHasSpecific && mNoScars)) {
+    return { score: -10, match: 'contradiction', keywords: [] }
+  }
+
+  // Strong reward for shared specific marks (surgical scars, amputations, implants — highly identifying)
+  const highValue = ['surgical','amputation','prosthetic','implant','brand']
+  const sharedHigh = shared.filter(k => highValue.includes(k))
+  const score = sharedHigh.length > 0 ? Math.min(20, sharedHigh.length * 12)
+    : shared.length > 0 ? Math.min(12, shared.length * 5)
+    : 0
   const match = shared.length > 0 ? 'shared' : mMarks.length > 0 && uMarks.length > 0 ? 'both_have_marks' : 'none_mentioned'
   return { score, match, keywords: shared }
 }
@@ -1171,6 +1204,87 @@ function extractPersonNames(text: string): { value: string; snippet: string }[] 
   return results.slice(0, 5)
 }
 
+// ─── Destination extraction ──────────────────────────────────────────────────
+// Extracts "believed to be heading to" destination from circumstances text.
+// Returns { text, city, state } or null if no destination found.
+
+const DESTINATION_RE = [
+  /\ben\s+route\s+to\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bheading\s+(?:to|towards|for)\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bon\s+(?:her|his|their)\s+way\s+to\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\btraveling\s+(?:to|towards)\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bdriving\s+to\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bbound\s+for\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bdestination\s+(?:was|is)\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bgoing\s+to\s+(?:visit|stay|meet|see)\s+(?:\w+\s+)?(?:in|at)\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bintended\s+(?:destination|to\s+(?:go|travel|drive)(?:\s+to)?)\s+([A-Z][^.,;!?\n]{2,50})/i,
+  /\bplanning\s+to\s+(?:go\s+to|travel\s+to|move\s+to|visit)\s+([A-Z][^.,;!?\n]{2,50})/i,
+]
+
+const DEST_STATE_NAMES: Record<string, string> = {
+  AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',
+  CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',
+  HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',
+  KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',
+  MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',
+  MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',
+  NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',
+  OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',
+  SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',
+  VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming',
+  DC:'District of Columbia',
+}
+
+// Additional countries to detect as cross-border destinations
+// Must use word-boundary safe patterns — "panama city" should NOT match "panama"
+const FOREIGN_COUNTRIES = ['canada', 'mexico', 'united kingdom', 'england', 'france', 'germany',
+  'puerto rico', 'cuba', 'haiti', 'dominican republic', 'colombia', 'brazil', 'venezuela', 'honduras',
+  'guatemala', 'el salvador', 'nicaragua', 'costa rica', 'jamaica']
+
+function extractDestination(circumstances: string | null): { text: string; city: string | null; state: string | null } | null {
+  if (!circumstances) return null
+  for (const re of DESTINATION_RE) {
+    const m = circumstances.match(re)
+    if (!m) continue
+    const raw = m[1].trim().replace(/\s*[.!?]$/, '')
+
+    // Try "City, State" format first
+    const parts = raw.split(',').map(s => s.trim())
+    const city = parts[0] || null
+    let state: string | null = null
+    if (parts[1]) {
+      const w = parts[1].split(' ')[0].toUpperCase()
+      state = DEST_STATE_NAMES[w] ?? parts[1]
+    }
+
+    // If no state found via comma, search the full raw text for a state name
+    // e.g. "Elephant Butte Reservoir in southern New Mexico"
+    if (!state) {
+      const rawLower = raw.toLowerCase()
+      for (const [abbr, fullName] of Object.entries(DEST_STATE_NAMES)) {
+        if (rawLower.includes(fullName.toLowerCase())) { state = fullName; break }
+        // Also catch " NY " / " CA " as standalone abbreviation in text
+        const abbrRe = new RegExp(`\\b${abbr}\\b`)
+        if (abbrRe.test(raw)) { state = fullName; break }
+      }
+    }
+
+    // Check for foreign country mentions (word-boundary match to avoid "Panama City" → "panama")
+    if (!state) {
+      const rawLower = raw.toLowerCase()
+      for (const country of FOREIGN_COUNTRIES) {
+        const re = new RegExp(`\\b${country.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+        if (re.test(rawLower)) { state = country; break }
+      }
+    }
+
+    if (city && city.length >= 2) {
+      return { text: m[0].trim(), city, state }
+    }
+  }
+  return null
+}
+
 // ─── Paginated fetch — Supabase PostgREST caps at max-rows (usually 1 000) ────
 // Fetches all submissions in 1 000-row pages and merges them.
 
@@ -1333,6 +1447,193 @@ export async function POST(req: NextRequest) {
 
     const processed = offset + missingParsed.length
     return NextResponse.json({ action: 'cross_match', processed, total, hasMore: processed < total, newMatches: inserted, eliminated, nextOffset: processed })
+  }
+
+  // ── DESTINATION ROUTE MATCH ──────────────────────────────────────────────────
+  // Same scoring as cross_match. Location signal uses destination (where the
+  // missing person was believed to be heading) instead of last-known location.
+  // Pre-filters unidentified remains to destination state to reduce noise.
+  if (action === 'destination_route_match') {
+    if (!unidentifiedCaseId) return NextResponse.json({ error: 'unidentifiedCaseId required' }, { status: 400 })
+
+    // Fetch all missing persons and filter to those with cross-state destinations
+    // Only include if destination state is identified AND differs from home state
+    // (local/in-state travel is handled by standard cross_match)
+    const missingRaw = await fetchAllSubmissions(supabase, missingCaseId)
+    const missingParsed = missingRaw.map(parseSubmission)
+      .filter(p => {
+        const dest = extractDestination(p.circumstances)
+        if (!dest) return false
+        // Must have identified a destination state
+        if (!dest.state) return false
+        // Destination must differ from home state (cross-state travel)
+        if (p.state) {
+          const homeNorm = p.state.toLowerCase().trim()
+          const destNorm = dest.state.toLowerCase().trim()
+          if (homeNorm === destNorm) return false
+        }
+        return true
+      })
+
+    if (!missingParsed.length) {
+      return NextResponse.json({ action: 'destination_route_match', processed: 0, total: 0, inserted: 0, hasMore: false })
+    }
+
+    // Fetch all unidentified remains
+    const unidentRaw = await fetchAllSubmissions(supabase, unidentifiedCaseId)
+    const unidentParsed = unidentRaw.map(parseSubmission)
+
+    // Paginate through missing persons with destinations
+    const total = missingParsed.length
+    const batch = missingParsed.slice(offset, offset + limit)
+    let inserted = 0
+    let eliminated = 0
+    const toInsert: object[] = []
+
+    // Delete existing destination_route_match candidates for this page's missing persons
+    const batchIds = batch.map(p => p.submissionId)
+    if (batchIds.length) {
+      await supabase.from('doe_match_candidates' as never)
+        .delete()
+        .in('missing_submission_id', batchIds as never)
+        .eq('match_type', 'destination_route_match' as never)
+    }
+
+    for (const missing of batch) {
+      const dest = extractDestination(missing.circumstances)
+      if (!dest) continue
+
+      // Build a proxy ParsedCase with destination as location for scoring
+      const destProxy: ParsedCase = {
+        ...missing,
+        location: dest.city ? `${dest.city}${dest.state ? ', ' + dest.state : ''}` : missing.location,
+        state: dest.state ? extractState(dest.state) ?? missing.state : missing.state,
+      }
+
+      // Filter unidentified to destination state (or all if state unknown)
+      const destStateAbbr = destProxy.state
+      const candidates = destStateAbbr
+        ? unidentParsed.filter(u => !u.state || u.state.toLowerCase() === destStateAbbr.toLowerCase())
+        : unidentParsed
+
+      for (const unident of candidates) {
+        // Hard eliminate sex mismatch
+        const sexA = normSex(missing.sex), sexB = normSex(unident.sex)
+        if (sexA && sexB && sexA !== sexB) { eliminated++; continue }
+
+        // Hard eliminate temporal impossibility — remains found before person went missing
+        if (unident.year && missing.year && unident.year < missing.year) { eliminated++; continue }
+
+        // Hard eliminate race mismatch
+        const raceA = normRace(missing.race), raceB = normRace(unident.race)
+        if (raceA && raceB && raceA !== raceB) { eliminated++; continue }
+
+        // Hard eliminate large age gap (> 12 years mid-point to mid-point)
+        const ageRangeA = parseAgeRange(missing.age), ageRangeB = parseAgeRange(unident.age)
+        if (ageRangeA && ageRangeB) {
+          const midA = (ageRangeA[0] + ageRangeA[1]) / 2
+          const midB = (ageRangeB[0] + ageRangeB[1]) / 2
+          if (Math.abs(midA - midB) > 12) { eliminated++; continue }
+        }
+
+        const signals: MatchSignals = {
+          sex:        scoreSex(missing, unident),
+          race:       scoreRace(missing, unident),
+          age:        scoreAge(missing, unident),
+          hair:       scoreHair(missing, unident),
+          eyes:       scoreEyes(missing, unident),
+          height:     scoreHeight(missing, unident),
+          weight:     scoreWeight(missing, unident),
+          tattoo:     scoreTattoos(missing, unident),
+          body_marks: scoreBodyMarks(missing, unident),
+          jewelry:    scoreJewelry(missing, unident),
+          location:   scoreLocation(destProxy, unident),   // <-- destination proxy
+          childbirth: scoreChildbirth(missing, unident),
+        }
+
+        // Apply body state decomposition weighting
+        const bsBodyState = unident.bodyState
+        const bsW = DECOMP_WEIGHTS[bsBodyState]
+        const bsNote = DECOMP_NOTES[bsBodyState]
+        signals.hair       = { ...signals.hair,       score: Math.round(signals.hair.score       * bsW.hair)       }
+        signals.eyes       = { ...signals.eyes,       score: Math.round(signals.eyes.score       * bsW.eyes)       }
+        signals.weight     = { ...signals.weight,     score: Math.round(signals.weight.score     * bsW.weight)     }
+        signals.tattoo     = { ...signals.tattoo,     score: Math.round(signals.tattoo.score     * bsW.tattoo)     }
+        signals.body_marks = { ...signals.body_marks, score: Math.round(signals.body_marks.score * bsW.body_marks) }
+        if (bsBodyState !== 'intact' && bsBodyState !== 'unknown') {
+          signals.body_state = { state: bsBodyState, note: bsNote, weight_applied: true }
+        }
+
+        const composite = Object.values(signals).reduce((sum, s) => {
+          if (s && typeof s === 'object' && 'score' in s) return sum + (s as SignalResult).score
+          return sum
+        }, 0)
+
+        // Route matches require a higher baseline — sex+race already confirmed above,
+        // so we expect more meaningful signal before storing
+        if (composite < 35) { eliminated++; continue }
+
+        const grade = composite >= 70 ? 'very_strong' : composite >= 55 ? 'strong' : composite >= 40 ? 'notable' : 'moderate'
+
+        toInsert.push({
+          missing_case_id:                missingCaseId,
+          unidentified_case_id:           unidentifiedCaseId,
+          missing_submission_id:          missing.submissionId,
+          unidentified_submission_id:     unident.submissionId,
+          composite_score:                composite,
+          grade,
+          signals:                        signals as unknown as Record<string, unknown>,
+          missing_doe_id:                 missing.doeId,
+          missing_name:                   missing.name,
+          missing_sex:                    missing.sex,
+          missing_race:                   missing.race,
+          missing_age:                    missing.age,
+          missing_location:               missing.location,
+          missing_date:                   missing.date,
+          missing_hair:                   missing.hair,
+          missing_eyes:                   missing.eyes,
+          missing_marks:                  missing.marks,
+          missing_jewelry:                missing.jewelry,
+          unidentified_doe_id:            unident.doeId,
+          unidentified_sex:               unident.sex,
+          unidentified_race:              unident.race,
+          unidentified_age:               unident.age,
+          unidentified_location:          unident.location,
+          unidentified_date:              unident.date,
+          unidentified_hair:              unident.hair,
+          unidentified_eyes:              unident.eyes,
+          unidentified_marks:             unident.marks,
+          unidentified_jewelry:           unident.jewelry,
+          reviewer_status:                'unreviewed',
+          match_type:                     'destination_route_match',
+          destination_text:               dest.text,
+          destination_city:               dest.city,
+          destination_state:              dest.state,
+        })
+      }
+    }
+
+    // Batch upsert (safe to re-run)
+    for (let i = 0; i < toInsert.length; i += 200) {
+      const { error } = await supabase.from('doe_match_candidates' as never)
+        .upsert(toInsert.slice(i, i + 200) as never, {
+          onConflict: 'missing_submission_id,unidentified_submission_id',
+          ignoreDuplicates: false,
+        })
+      if (!error) inserted += Math.min(200, toInsert.length - i)
+    }
+
+    const processed = offset + batch.length
+    const hasMore = processed < total
+    return NextResponse.json({
+      action: 'destination_route_match',
+      processed,
+      total,
+      hasMore,
+      nextOffset: processed,
+      newMatches: inserted,
+      eliminated,
+    })
   }
 
   // ── DEMOGRAPHIC / TEMPORAL CLUSTER ───────────────────────────────────────────
@@ -2477,10 +2778,10 @@ export async function POST(req: NextRequest) {
     const memberRows: object[] = []
 
     for (const [corridorId, subs] of corridorBuckets) {
-      if (subs.length < 3) continue
+      if (subs.length < 2) continue
       // Remove duplicate submissions (a case can be near two corridors)
       const unique = Array.from(new Map(subs.map(s => [s.submissionId, s])).values())
-      if (unique.length < 3) continue
+      if (unique.length < 2) continue
 
       const years = unique.map(s => s.year).filter(Boolean) as number[]
       const yearMin = years.length ? Math.min(...years) : null
@@ -2698,6 +2999,132 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // ── SYNTHESIZE ALL CLUSTERS (batch AI with deep-connection flagging) ──────────
+  if (action === 'synthesize_all_clusters') {
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) return NextResponse.json({ error: 'AI service not configured' }, { status: 503 })
+
+    // Fetch up to 8 un-narrated clusters at a time (fits within 60s maxDuration)
+    const { data: rawClusters } = await supabase
+      .from('doe_victimology_clusters' as never)
+      .select('id, cluster_label, cluster_type, submission_ids, signals')
+      .eq('case_id', missingCaseId)
+      .is('ai_narrative', null)
+      .limit(8) as {
+        data: Array<{
+          id: string
+          cluster_label: string
+          cluster_type: string
+          submission_ids: string[]
+          signals: Record<string, unknown>
+        }> | null
+      }
+
+    if (!rawClusters?.length) {
+      return NextResponse.json({ action: 'synthesize_all_clusters', processed: 0, remaining: 0 })
+    }
+
+    const anthropic = new Anthropic({ apiKey, timeout: 45_000 })
+    let processed = 0, failed = 0
+
+    for (const cluster of rawClusters) {
+      try {
+        const subIds = (cluster.submission_ids ?? []).slice(0, 15)
+        const { data: subs } = await supabase
+          .from('submissions').select('id, raw_text, notes').in('id', subIds)
+
+        const caseSummaries = (subs ?? []).map((s: RawSubmission, i: number) => {
+          const p = parseSubmission(s)
+          const sigs = extractCircumstanceSignals(p)
+          return [
+            `Case ${i + 1} [SUB_ID:${s.id}]: ${p.name ?? 'Unknown'}, ${p.sex ?? '?'}, ${p.race ?? '?'}, age ${p.age ?? '?'}, DOE:${p.doeId ?? 'N/A'}`,
+            `  Last seen: ${p.location ?? 'unknown'}, ${p.date ?? 'unknown date'}`,
+            p.circumstances ? `  Circumstances: ${p.circumstances.slice(0, 400)}` : null,
+            sigs.length ? `  Signals: ${sigs.join(', ')}` : null,
+          ].filter(Boolean).join('\n')
+        }).join('\n\n')
+
+        const totalCount = cluster.submission_ids?.length ?? subIds.length
+
+        const prompt = [
+          `You are an analyst assisting investigators reviewing missing persons patterns.`,
+          ``,
+          `Cluster: "${cluster.cluster_label}" (${totalCount} cases total, showing ${subIds.length})`,
+          ``,
+          caseSummaries,
+          ``,
+          `Respond with a JSON object (no other text) with exactly these fields:`,
+          `{`,
+          `  "narrative": "3–5 sentence investigative analysis. Start with 'This cluster of [N] cases...'. Cover: what the cases share and why the pattern matters; what vulnerability factors or circumstances the signals suggest; what an investigator should verify.",`,
+          `  "flagged_ids": ["SUB_ID value", ...],  (0–3 submission IDs from above that show the deepest suspicious connections to each other BEYOND the clustering dimension — shared unusual circumstance details, matching physical descriptions, proximity in time/location not captured by the cluster. Empty array [] if none stand out.)`,
+          `  "flag_reason": "One sentence explaining why those specific cases are flagged together. null if flagged_ids is empty.",`,
+          `  "urgency": 1-5 integer. How urgently this cluster warrants investigator attention. Use this scale strictly:`,
+          `    5 = Immediate — specific cases with matching physical details, shared unusual circumstances, or potential cross-jurisdiction pattern that could yield identifications`,
+          `    4 = High — strong pattern with multiple corroborating signals; investigator should review within days`,
+          `    3 = Moderate — notable pattern worth investigating; no acute indicators`,
+          `    2 = Low — statistical cluster with weak signal; review when time allows`,
+          `    1 = Informational — very broad or expected pattern; no specific investigative value`,
+          `}`,
+          ``,
+          `Rules: Do not speculate about perpetrators. Do not state conclusions. Be specific and factual. Reserve urgency 5 for clusters with genuinely specific cross-case signals.`,
+        ].join('\n')
+
+        const response = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 700,
+          messages: [{ role: 'user', content: prompt }],
+        })
+
+        const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : null
+        if (!text) { failed++; continue }
+
+        let aiResult: { narrative: string; flagged_ids: string[]; flag_reason: string | null; urgency?: number }
+        try {
+          const jsonMatch = text.match(/\{[\s\S]*\}/)
+          aiResult = JSON.parse(jsonMatch ? jsonMatch[0] : text)
+        } catch {
+          failed++; continue
+        }
+
+        const urgency = typeof aiResult.urgency === 'number'
+          ? Math.max(1, Math.min(5, Math.round(aiResult.urgency)))
+          : (Array.isArray(aiResult.flagged_ids) && aiResult.flagged_ids.length > 0 ? 3 : 2)
+
+        const updatedSignals = {
+          ...cluster.signals,
+          ai_flagged_ids: Array.isArray(aiResult.flagged_ids) ? aiResult.flagged_ids : [],
+          ai_flag_reason: aiResult.flag_reason ?? null,
+          ai_urgency: urgency,
+        }
+
+        await supabase.from('doe_victimology_clusters' as never).update({
+          ai_narrative: aiResult.narrative ?? null,
+          ai_generated_at: new Date().toISOString(),
+          signals: updatedSignals,
+        } as never).eq('id', cluster.id)
+
+        processed++
+      } catch {
+        failed++
+      }
+    }
+
+    // Count remaining
+    const { count: remaining } = await supabase
+      .from('doe_victimology_clusters' as never)
+      .select('id', { count: 'exact', head: true })
+      .eq('case_id', missingCaseId)
+      .is('ai_narrative', null) as { count: number | null }
+
+    return NextResponse.json({
+      action: 'synthesize_all_clusters',
+      processed,
+      failed,
+      batch: rawClusters.length,
+      remaining: remaining ?? 0,
+    })
+  }
+
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
 
@@ -2768,6 +3195,46 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ entities: data, total: count, page })
   }
 
+  // Tattoo/mark keyword search — returns missing persons + unidentified remains that share the keyword
+  if (type === 'tattoo_search') {
+    const keyword = params.get('keyword')?.toLowerCase().trim()
+    if (!keyword || keyword.length < 2) return NextResponse.json({ error: 'keyword required (min 2 chars)' }, { status: 400 })
+    const unidCaseId = params.get('unidentifiedCaseId')
+
+    // Search missing persons (raw_text ilike)
+    const { data: missingRows } = await supabase
+      .from('submissions' as never)
+      .select('id, raw_text')
+      .eq('case_id', missingCaseId)
+      .ilike('raw_text', `%${keyword}%`) as { data: Array<{ id: string; raw_text: string }> | null }
+
+    // Search unidentified remains
+    let unidRows: Array<{ id: string; raw_text: string }> = []
+    if (unidCaseId) {
+      const { data } = await supabase
+        .from('submissions' as never)
+        .select('id, raw_text')
+        .eq('case_id', unidCaseId)
+        .ilike('raw_text', `%${keyword}%`) as { data: Array<{ id: string; raw_text: string }> | null }
+      unidRows = data ?? []
+    }
+
+    function extractTattooContext(rawText: string, kw: string) {
+      const p = parseSubmission({ id: '', raw_text: rawText, notes: null })
+      // Find the snippet containing the keyword in marks/circumstances
+      const searchIn = [p.marks, p.circumstances].filter(Boolean).join(' ')
+      const idx = searchIn.toLowerCase().indexOf(kw)
+      const snippet = idx >= 0 ? searchIn.slice(Math.max(0, idx - 40), idx + kw.length + 60).trim() : null
+      return { doeId: p.doeId, name: p.name, sex: p.sex, race: p.race, age: p.age, date: p.date, state: p.state, snippet }
+    }
+
+    return NextResponse.json({
+      keyword,
+      missing:      (missingRows ?? []).map(r => ({ submissionId: r.id, ...extractTattooContext(r.raw_text, keyword) })),
+      unidentified: unidRows.map(r => ({ submissionId: r.id, ...extractTattooContext(r.raw_text, keyword) })),
+    })
+  }
+
   if (type === 'cluster_members') {
     const cId = params.get('clusterId')
     if (!cId) return NextResponse.json({ error: 'clusterId required' }, { status: 400 })
@@ -2793,6 +3260,26 @@ export async function GET(req: NextRequest) {
     const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ clusters: data, total: count, page })
+  }
+
+  if (type === 'route_matches') {
+    let q = (supabase
+      .from('doe_match_candidates' as never)
+      .select('*', { count: 'exact' }) as unknown as CQ)
+      .eq('missing_case_id', missingCaseId)
+      .eq('match_type', 'destination_route_match')
+      .order('composite_score', { ascending: false })
+
+    if (grade === 'notable_plus') {
+      q = (q as unknown as { in: (col: string, vals: string[]) => CQ }).in('grade', ['notable', 'strong', 'very_strong'])
+    } else if (grade) {
+      q = q.eq('grade', grade)
+    }
+    if (reviewerStatus) q = q.eq('reviewer_status', reviewerStatus)
+
+    const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ matches: data, total: count, page })
   }
 
   // Match candidates

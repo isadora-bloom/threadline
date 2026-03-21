@@ -16,7 +16,7 @@ import {
   CheckCircle, XCircle, Clock, RefreshCw, Sparkles,
   User, MapPin, Calendar, Eye, Scissors, Scale, Ruler,
   Skull, Flame, Brain, Car, UserX, Search, ShieldAlert,
-  Fingerprint, Globe,
+  Fingerprint, Globe, ExternalLink, ArrowUpDown,
 } from 'lucide-react'
 
 interface AiAssessment {
@@ -61,6 +61,10 @@ interface DoeMatchCandidate {
   reviewer_note: string | null
   ai_assessment: AiAssessment | null
   generated_at: string
+  destination_text:  string | null
+  destination_city:  string | null
+  destination_state: string | null
+  match_type:        string | null
 }
 
 interface DoeCluster {
@@ -654,7 +658,8 @@ const MEMBER_STATUS_STYLE: Record<string, string> = {
   rejected:  'bg-red-50 text-red-500',
 }
 
-function ClusterMemberRow({ member, missingCaseId, onReviewMember }: {
+function ClusterMemberRow({ member, missingCaseId, onReviewMember, isAiFlagged }: {
+  isAiFlagged?: boolean
   member: DoeClusterMember
   missingCaseId: string
   onReviewMember: (id: string, status: 'confirmed' | 'rejected' | 'candidate') => void
@@ -683,7 +688,9 @@ function ClusterMemberRow({ member, missingCaseId, onReviewMember }: {
   const isRejected = member.membership_status === 'rejected'
 
   return (
-    <div className={`flex items-start gap-2 p-2 rounded border border-slate-100 text-[10px] transition-opacity ${isRejected ? 'opacity-40' : ''}`}>
+    <div className={`flex items-start gap-2 p-2 rounded text-[10px] transition-opacity
+      ${isRejected ? 'opacity-40' : ''}
+      ${isAiFlagged ? 'border border-violet-200 bg-violet-50' : 'border border-slate-100'}`}>
       {/* Confidence */}
       <div className="flex-shrink-0 text-center w-8">
         <div className={`text-sm font-black ${pct >= 85 ? 'text-emerald-700' : pct >= 75 ? 'text-amber-600' : 'text-slate-500'}`}>{pct}%</div>
@@ -691,7 +698,14 @@ function ClusterMemberRow({ member, missingCaseId, onReviewMember }: {
 
       {/* Member info */}
       <div className="flex-1 min-w-0">
-        <div className="font-semibold text-slate-800 truncate">{member.member_name ?? 'Unknown'}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="font-semibold text-slate-800 truncate">{member.member_name ?? 'Unknown'}</span>
+          {isAiFlagged && (
+            <span className="flex-shrink-0 flex items-center gap-0.5 text-[9px] font-semibold text-violet-600 bg-violet-100 px-1.5 py-0.5 rounded">
+              <Brain className="h-2 w-2" />AI flagged
+            </span>
+          )}
+        </div>
         <div className="text-slate-500 flex flex-wrap gap-x-2 mt-0.5">
           {member.member_sex && <span>{member.member_sex}</span>}
           {member.member_age && <span>age {member.member_age}</span>}
@@ -705,17 +719,28 @@ function ClusterMemberRow({ member, missingCaseId, onReviewMember }: {
         {member.notes && (
           <div className="text-slate-400 mt-0.5 text-[9px] leading-snug line-clamp-2">{member.notes}</div>
         )}
-        <button
-          onClick={loadRecord}
-          className="text-[9px] text-indigo-400 hover:text-indigo-600 mt-0.5 flex items-center gap-0.5"
-        >
-          {recordLoading
-            ? <><Loader2 className="h-2 w-2 animate-spin" />Loading…</>
-            : showRecord
-            ? <><ChevronUp className="h-2 w-2" />Hide record</>
-            : <><ChevronDown className="h-2 w-2" />View full record</>
-          }
-        </button>
+        <div className="flex items-center gap-2 mt-0.5">
+          <button
+            onClick={loadRecord}
+            className="text-[9px] text-indigo-400 hover:text-indigo-600 flex items-center gap-0.5"
+          >
+            {recordLoading
+              ? <><Loader2 className="h-2 w-2 animate-spin" />Loading…</>
+              : showRecord
+              ? <><ChevronUp className="h-2 w-2" />Hide record</>
+              : <><ChevronDown className="h-2 w-2" />View full record</>
+            }
+          </button>
+          <a
+            href={`/cases/${missingCaseId}/submissions/${member.submission_id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[9px] text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 font-medium"
+            onClick={e => e.stopPropagation()}
+          >
+            <ExternalLink className="h-2 w-2" />Open case file
+          </a>
+        </div>
         {showRecord && record && (
           <pre className="mt-1 text-[9px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto font-mono">
             {record}
@@ -918,6 +943,22 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2">
+                  {(() => {
+                    const urgency = (cluster.signals as { ai_urgency?: number }).ai_urgency
+                    if (!urgency) return null
+                    const urgencyConfig = urgency >= 5
+                      ? { label: '🔴 5', cls: 'bg-red-100 text-red-700 border-red-200' }
+                      : urgency === 4
+                      ? { label: '🟠 4', cls: 'bg-orange-100 text-orange-700 border-orange-200' }
+                      : urgency === 3
+                      ? { label: '🟡 3', cls: 'bg-yellow-100 text-yellow-700 border-yellow-200' }
+                      : { label: '⚪ ' + urgency, cls: 'bg-slate-100 text-slate-500 border-slate-200' }
+                    return (
+                      <Badge className={`text-[10px] border font-bold ${urgencyConfig.cls}`} title="AI urgency score (1–5)">
+                        {urgencyConfig.label}
+                      </Badge>
+                    )
+                  })()}
                   <Badge className={`text-[10px] ${STATUS_STYLE[cluster.reviewer_status]}`}>
                     {cluster.reviewer_status.replace(/_/g, ' ')}
                   </Badge>
@@ -1144,7 +1185,16 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                 {!membersLoading && members && members.length > 0 && (
                   <div className="space-y-1.5 max-h-64 overflow-y-auto">
                     {members.map(m => (
-                      <ClusterMemberRow key={m.id} member={m} missingCaseId={missingCaseId} onReviewMember={handleMemberReview} />
+                      <ClusterMemberRow
+                        key={m.id}
+                        member={m}
+                        missingCaseId={missingCaseId}
+                        onReviewMember={handleMemberReview}
+                        isAiFlagged={
+                          Array.isArray((cluster.signals as { ai_flagged_ids?: string[] }).ai_flagged_ids) &&
+                          ((cluster.signals as { ai_flagged_ids?: string[] }).ai_flagged_ids ?? []).includes(m.submission_id)
+                        }
+                      />
                     ))}
                   </div>
                 )}
@@ -1153,11 +1203,21 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
 
             {/* AI narrative */}
             {cluster.ai_narrative && (
-              <div className="p-3 bg-violet-50 border border-violet-100 rounded space-y-1">
+              <div className="p-3 bg-violet-50 border border-violet-100 rounded space-y-1.5">
                 <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide flex items-center gap-1">
                   <Brain className="h-3 w-3" />AI analysis
                 </p>
                 <p className="text-[11px] text-violet-900 leading-relaxed">{cluster.ai_narrative}</p>
+                {(cluster.signals as { ai_flag_reason?: string | null }).ai_flag_reason && (
+                  <div className="mt-1 pt-1.5 border-t border-violet-100">
+                    <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide flex items-center gap-1 mb-0.5">
+                      <Brain className="h-2.5 w-2.5" />Deeper connection flagged
+                    </p>
+                    <p className="text-[11px] text-violet-800 leading-relaxed italic">
+                      {(cluster.signals as { ai_flag_reason?: string }).ai_flag_reason}
+                    </p>
+                  </div>
+                )}
                 <p className="text-[9px] text-violet-400">AI-generated for investigator review. Not a conclusion.</p>
               </div>
             )}
@@ -1320,7 +1380,7 @@ function EntityCard({ entity }: { entity: DoeEntityMention }) {
 
 export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'matches' | 'clusters' | 'stalls' | 'entities'>('matches')
+  const [activeTab, setActiveTab] = useState<'matches' | 'clusters' | 'stalls' | 'entities' | 'route'>('matches')
   const [gradeFilter, setGradeFilter] = useState('notable_plus')
   const [statusFilter, setStatusFilter] = useState('unreviewed')
   const [page, setPage] = useState(0)
@@ -1333,6 +1393,11 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     newMatches: number
     unidentifiedCaseId: string | null
   }>({ running: false, processed: 0, total: 0, newMatches: 0, unidentifiedCaseId: null })
+
+  // Route match run state
+  const [routeRunState, setRouteRunState] = useState<{
+    running: boolean; processed: number; total: number; newMatches: number
+  }>({ running: false, processed: 0, total: 0, newMatches: 0 })
 
   const [clusterRunning, setClusterRunning] = useState(false)
   const [circumstanceRunning, setCircumstanceRunning] = useState(false)
@@ -1352,12 +1417,21 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [aiReviewRunning, setAiReviewRunning] = useState(false)
   const [aiReviewProgress, setAiReviewProgress] = useState<{ reviewed: number; remaining: number } | null>(null)
   const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity' | 'location_runaway_cluster' | 'corridor_cluster' | 'age_bracket' | 'demographic_hotspot' | 'highway_proximity' | 'national_park_proximity'>('all')
+  const [clusterSort, setClusterSort] = useState<'urgency' | 'count'>('urgency')
   const [stallTypeFilter, setStallTypeFilter] = useState<'all' | 'voluntary_misclassification' | 'runaway_no_followup' | 'quick_closure_young'>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
   const [signalCountFilter, setSignalCountFilter] = useState(0)
   const [marksFilter, setMarksFilter] = useState(false)
   const [aiVerdictFilter, setAiVerdictFilter] = useState<'all' | 'plausible' | 'uncertain' | 'unlikely' | 'reviewed'>('all')
   const [personShowLimit, setPersonShowLimit] = useState<Map<string, number>>(new Map())
+  const [tattooSearchOpen, setTattooSearchOpen] = useState(false)
+  const [tattooKeyword, setTattooKeyword] = useState('')
+  const [tattooResults, setTattooResults] = useState<{
+    keyword: string
+    missing: Array<{ submissionId: string; doeId: string | null; name: string | null; sex: string | null; race: string | null; age: string | null; date: string | null; state: string | null; snippet: string | null }>
+    unidentified: Array<{ submissionId: string; doeId: string | null; name: string | null; sex: string | null; race: string | null; age: string | null; date: string | null; state: string | null; snippet: string | null }>
+  } | null>(null)
+  const [tattooSearching, setTattooSearching] = useState(false)
 
   const supabase = createClient()
 
@@ -1405,6 +1479,23 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       return await res.json() as { matches: DoeMatchCandidate[]; total: number }
     },
     enabled: activeTab === 'matches',
+  })
+
+  // Fetch route match candidates (destination-based)
+  const routeMatchQuery = useQuery({
+    queryKey: ['doe-route-matches', effectiveCaseId, gradeFilter, statusFilter, page],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        missingCaseId: effectiveCaseId,
+        type: 'route_matches',
+        page: String(page),
+      })
+      if (gradeFilter !== 'all') params.set('grade', gradeFilter)
+      if (statusFilter !== 'all') params.set('reviewerStatus', statusFilter)
+      const res = await fetch(`/api/pattern/doe-match?${params}`)
+      return await res.json() as { matches: DoeMatchCandidate[]; total: number }
+    },
+    enabled: activeTab === 'route',
   })
 
   // Fetch clusters
@@ -1481,6 +1572,34 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       setRunState(prev => ({ ...prev, running: false }))
     }
   }, [caseId, queryClient])
+
+  const runRouteMatch = useCallback(async (unidentifiedCaseId: string, startOffset = 0, totalAcc = 0, matchAcc = 0) => {
+    setRouteRunState(prev => ({ ...prev, running: true }))
+    try {
+      const res = await fetch('/api/pattern/doe-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'destination_route_match',
+          missingCaseId: effectiveCaseId,
+          unidentifiedCaseId,
+          offset: startOffset,
+          limit: 200,
+        }),
+      })
+      const data = await res.json()
+      const newTotal = totalAcc + (data.processed - startOffset)
+      const newMatches = matchAcc + (data.newMatches ?? 0)
+      setRouteRunState({ running: data.hasMore, processed: data.processed ?? 0, total: data.total ?? 0, newMatches })
+      if (data.hasMore) {
+        await runRouteMatch(unidentifiedCaseId, data.nextOffset, newTotal, newMatches)
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['doe-route-matches', effectiveCaseId] })
+      }
+    } catch {
+      setRouteRunState(prev => ({ ...prev, running: false }))
+    }
+  }, [effectiveCaseId, queryClient])
 
   const runCluster = useCallback(async () => {
     setClusterRunning(true)
@@ -1749,6 +1868,26 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     }
   }, [effectiveCaseId, queryClient])
 
+  async function runTattooSearch() {
+    const kw = tattooKeyword.trim()
+    if (!kw || kw.length < 2) return
+    setTattooSearching(true)
+    setTattooResults(null)
+    try {
+      const params = new URLSearchParams({
+        missingCaseId: effectiveCaseId,
+        type: 'tattoo_search',
+        keyword: kw,
+      })
+      if (doeCases?.unidentified) params.set('unidentifiedCaseId', doeCases.unidentified)
+      const res = await fetch(`/api/pattern/doe-match?${params}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setTattooResults(await res.json())
+    } finally {
+      setTattooSearching(false)
+    }
+  }
+
   const allMatches = matchQuery.data?.matches ?? []
   const matches = allMatches
     .filter(m => signalCountFilter === 0 || countPositiveSignals(m.signals) >= signalCountFilter)
@@ -1830,6 +1969,13 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                 disabled={runState.running} onClick={() => runCrossMatch(doeCases.unidentified!)}>
                 {runState.running ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                 {runState.running ? `Matching… ${runState.processed}/${runState.total}` : 'Cross-match'}
+              </Button>
+            )}
+            {doeCases?.unidentified && (
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-teal-200 text-teal-700 hover:bg-teal-50"
+                disabled={routeRunState.running} onClick={() => runRouteMatch(doeCases.unidentified!)}>
+                {routeRunState.running ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
+                {routeRunState.running ? `Route matching… ${routeRunState.processed}/${routeRunState.total}` : 'Route match'}
               </Button>
             )}
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-green-200 text-green-700 hover:bg-green-50"
@@ -1945,6 +2091,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       <div className="flex gap-1 border-b border-slate-200 pb-0 flex-wrap">
         {[
           { id: 'matches'  as const, label: 'Missing ↔ Unidentified', count: totalMatches },
+          { id: 'route'    as const, label: 'Route Matches',            count: routeMatchQuery.data?.total ?? 0 },
           { id: 'clusters' as const, label: 'Clusters',                count: totalClusters },
           { id: 'stalls'   as const, label: 'Stall Flags',             count: totalStalls },
           { id: 'entities' as const, label: 'Entity Cross-Match',      count: totalEntities },
@@ -2085,7 +2232,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
             ))}
           </div>
         )}
-        {(activeTab === 'matches' || activeTab === 'stalls') && (
+        {(activeTab === 'matches' || activeTab === 'route' || activeTab === 'stalls') && (
           <div className="flex gap-1 flex-wrap">
             {STATUS_FILTERS.map(f => (
               <button key={f.value} onClick={() => { setStatusFilter(f.value); setPage(0) }}
@@ -2098,6 +2245,110 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         )}
         </div>
       </div>
+
+      {/* Tattoo / Mark keyword search — available in both matches and route tabs */}
+      {(activeTab === 'matches' || activeTab === 'route') && (
+        <div className="border border-slate-200 rounded-lg overflow-hidden">
+          <button
+            className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+            onClick={() => { setTattooSearchOpen(o => !o); setTattooResults(null) }}
+          >
+            <Fingerprint className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+            <span className="text-xs font-semibold text-slate-700">Tattoo / Mark keyword search</span>
+            <span className="text-[10px] text-slate-400 ml-1">— find matching descriptions across missing persons & unidentified remains</span>
+            {tattooSearchOpen ? <ChevronUp className="h-3 w-3 text-slate-400 ml-auto" /> : <ChevronDown className="h-3 w-3 text-slate-400 ml-auto" />}
+          </button>
+          {tattooSearchOpen && (
+            <div className="px-3 pb-3 pt-2 space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder='e.g. panther, eagle, rose, dragon, anchor…'
+                  className="flex-1 text-xs border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  value={tattooKeyword}
+                  onChange={e => setTattooKeyword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && runTattooSearch()}
+                />
+                <Button size="sm" className="h-7 text-xs bg-amber-500 hover:bg-amber-600 text-white"
+                  onClick={runTattooSearch} disabled={tattooSearching || tattooKeyword.trim().length < 2}>
+                  {tattooSearching ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+                  <span className="ml-1">Search</span>
+                </Button>
+              </div>
+              {tattooResults && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                        Missing persons ({tattooResults.missing.length})
+                      </p>
+                      {tattooResults.missing.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 italic">None found</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {tattooResults.missing.map(r => (
+                            <div key={r.submissionId} className="text-[10px] bg-blue-50 border border-blue-100 rounded p-2">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="font-semibold text-slate-800">{r.name ?? 'Unknown'}</span>
+                                {r.doeId && <span className="font-mono text-indigo-400">{r.doeId}</span>}
+                                {r.sex && <span className="text-slate-500">{r.sex}</span>}
+                                {r.race && <span className="text-slate-500">{r.race}</span>}
+                                {r.age && <span className="text-slate-500">age {r.age}</span>}
+                                {r.state && <span className="text-slate-500">{r.state}</span>}
+                                {r.date && <span className="text-slate-400">{r.date}</span>}
+                                <a href={`/cases/${effectiveCaseId}/submissions/${r.submissionId}`} target="_blank" rel="noopener noreferrer"
+                                  className="ml-auto text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 font-medium">
+                                  <ExternalLink className="h-2 w-2" />View
+                                </a>
+                              </div>
+                              {r.snippet && <p className="mt-0.5 text-slate-500 italic">…{r.snippet}…</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                        Unidentified remains ({tattooResults.unidentified.length})
+                      </p>
+                      {tattooResults.unidentified.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 italic">None found</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {tattooResults.unidentified.map(r => (
+                            <div key={r.submissionId} className="text-[10px] bg-amber-50 border border-amber-100 rounded p-2">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="font-semibold text-slate-800">{r.doeId ?? 'Unknown ID'}</span>
+                                {r.sex && <span className="text-slate-500">{r.sex}</span>}
+                                {r.race && <span className="text-slate-500">{r.race}</span>}
+                                {r.age && <span className="text-slate-500">age {r.age}</span>}
+                                {r.state && <span className="text-slate-500">{r.state}</span>}
+                                {r.date && <span className="text-slate-400">{r.date}</span>}
+                                {doeCases?.unidentified && (
+                                  <a href={`/cases/${doeCases.unidentified}/submissions/${r.submissionId}`} target="_blank" rel="noopener noreferrer"
+                                    className="ml-auto text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 font-medium">
+                                    <ExternalLink className="h-2 w-2" />View
+                                  </a>
+                                )}
+                              </div>
+                              {r.snippet && <p className="mt-0.5 text-slate-500 italic">…{r.snippet}…</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {(tattooResults.missing.length > 0 && tattooResults.unidentified.length > 0) && (
+                    <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                      <strong>{tattooResults.missing.length} missing person{tattooResults.missing.length !== 1 ? 's' : ''}</strong> and <strong>{tattooResults.unidentified.length} unidentified case{tattooResults.unidentified.length !== 1 ? 's' : ''}</strong> both mention <strong>"{tattooResults.keyword}"</strong>. Review each record to check demographic compatibility before drawing conclusions.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Results */}
       {activeTab === 'matches' && (
@@ -2182,6 +2433,122 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         </>
       )}
 
+      {activeTab === 'route' && (
+        <>
+          {/* Route match info banner */}
+          <div className="flex items-start gap-2 bg-teal-50 border border-teal-200 rounded-lg p-3">
+            <MapPin className="h-3.5 w-3.5 text-teal-500 flex-shrink-0 mt-0.5" />
+            <p className="text-[11px] text-teal-700">
+              These candidates share physical characteristics with the missing person AND were found near or along
+              their believed route of travel. Destination extracted from circumstances text.
+            </p>
+          </div>
+
+          {routeMatchQuery.isLoading ? (
+            <div className="py-8 text-center"><Loader2 className="h-5 w-5 animate-spin text-slate-400 mx-auto" /></div>
+          ) : (routeMatchQuery.data?.matches ?? []).length === 0 ? (
+            <div className="py-10 text-center space-y-2">
+              <GitMerge className="h-8 w-8 text-slate-200 mx-auto" />
+              <p className="text-sm text-slate-400">
+                {(routeMatchQuery.data?.total ?? 0) === 0
+                  ? 'No route match candidates yet. Click "Route match" to score missing persons with known destinations against unidentified remains found along their route.'
+                  : 'No candidates match this filter.'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {(() => {
+                type RouteGroup = { submissionId: string; name: string | null; doeId: string | null; location: string | null; date: string | null; matches: DoeMatchCandidate[] }
+                const routeMap = new Map<string, RouteGroup>()
+                for (const m of (routeMatchQuery.data?.matches ?? [])) {
+                  const g = routeMap.get(m.missing_submission_id)
+                  if (g) {
+                    g.matches.push(m)
+                  } else {
+                    routeMap.set(m.missing_submission_id, {
+                      submissionId: m.missing_submission_id,
+                      name: m.missing_name,
+                      doeId: m.missing_doe_id,
+                      location: m.missing_location,
+                      date: m.missing_date,
+                      matches: [m],
+                    })
+                  }
+                }
+                const routeGroups = [...routeMap.values()].sort((a, b) => (b.matches[0]?.composite_score ?? 0) - (a.matches[0]?.composite_score ?? 0))
+                return routeGroups.map(group => (
+                  <div key={group.submissionId}>
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <User className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                      <span className="text-sm font-semibold text-slate-800">{group.name ?? 'Unknown name'}</span>
+                      {group.doeId && (
+                        <span className="text-[10px] text-indigo-400 font-mono">{group.doeId}</span>
+                      )}
+                      {group.location && (
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <MapPin className="h-2.5 w-2.5" />{group.location}
+                        </span>
+                      )}
+                      {group.date && (
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <Calendar className="h-2.5 w-2.5" />Missing {group.date}
+                        </span>
+                      )}
+                      <span className="ml-auto text-[10px] text-slate-400 flex-shrink-0">
+                        {group.matches.length} match{group.matches.length !== 1 ? 'es' : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 pl-3 border-l-2 border-teal-100">
+                      {group.matches.slice(0, personShowLimit.get(group.submissionId) ?? 10).map(m => (
+                        <div key={m.id}>
+                          {m.destination_text && (
+                            <div className="flex items-start gap-1.5 bg-teal-50 border border-teal-200 rounded px-2 py-1 mb-1">
+                              <MapPin className="h-3 w-3 text-teal-500 flex-shrink-0 mt-0.5" />
+                              <span className="text-[10px] text-teal-700">
+                                <span className="font-semibold">Was heading to {m.destination_city ?? 'unknown'}{m.destination_state ? ', ' + m.destination_state : ''}</span>
+                                {' — '}<span className="italic">{m.destination_text}</span>
+                              </span>
+                            </div>
+                          )}
+                          <MatchCard match={m} onReview={reviewMatch} />
+                        </div>
+                      ))}
+                      {group.matches.length > (personShowLimit.get(group.submissionId) ?? 10) && (
+                        <button
+                          className="text-[11px] text-teal-500 hover:text-teal-700 px-1 py-0.5"
+                          onClick={() => setPersonShowLimit(prev => {
+                            const next = new Map(prev)
+                            next.set(group.submissionId, (prev.get(group.submissionId) ?? 10) + 10)
+                            return next
+                          })}
+                        >
+                          Show {Math.min(10, group.matches.length - (personShowLimit.get(group.submissionId) ?? 10))} more matches for this person
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              })()}
+            </div>
+          )}
+
+          {(routeMatchQuery.data?.total ?? 0) > PAGE_SIZE && (
+            <div className="flex items-center justify-between pt-2">
+              <p className="text-xs text-slate-400">
+                Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, routeMatchQuery.data?.total ?? 0)} of {(routeMatchQuery.data?.total ?? 0).toLocaleString()} candidates
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page === 0}
+                  onClick={() => setPage(p => p - 1)}>Previous</Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs"
+                  disabled={(page + 1) * PAGE_SIZE >= (routeMatchQuery.data?.total ?? 0)}
+                  onClick={() => setPage(p => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {activeTab === 'clusters' && (
         <>
           {clusterQuery.isLoading ? (
@@ -2197,11 +2564,34 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {clusters.map(c => (
-                <ClusterCard key={c.id} cluster={c} missingCaseId={effectiveCaseId} onReview={reviewCluster} onSynthesize={synthesizeCluster} onReviewMember={reviewClusterMember} />
-              ))}
-            </div>
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-slate-400">{totalClusters.toLocaleString()} clusters</p>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-400">Sort:</span>
+                  <button
+                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${clusterSort === 'urgency' ? 'bg-violet-100 text-violet-700 border-violet-200' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+                    onClick={() => setClusterSort('urgency')}
+                  >AI urgency</button>
+                  <button
+                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${clusterSort === 'count' ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+                    onClick={() => setClusterSort('count')}
+                  >Case count</button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {[...clusters].sort((a, b) => {
+                  if (clusterSort === 'urgency') {
+                    const ua = (a.signals as { ai_urgency?: number }).ai_urgency ?? 0
+                    const ub = (b.signals as { ai_urgency?: number }).ai_urgency ?? 0
+                    return ub - ua || b.case_count - a.case_count
+                  }
+                  return b.case_count - a.case_count
+                }).map(c => (
+                  <ClusterCard key={c.id} cluster={c} missingCaseId={effectiveCaseId} onReview={reviewCluster} onSynthesize={synthesizeCluster} onReviewMember={reviewClusterMember} />
+                ))}
+              </div>
+            </>
           )}
 
           {totalClusters > PAGE_SIZE && (
