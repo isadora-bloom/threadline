@@ -18,9 +18,11 @@ import { createClient } from '@supabase/supabase-js'
 dotenv.config({ path: resolve(process.cwd(), '.env.local') })
 
 const BASE_URL = (() => {
-  const urlArg = process.argv.find(a => a.startsWith('--url='))?.split('=')[1]
-             ?? process.argv[process.argv.indexOf('--url') + 1]
-  if (urlArg && !urlArg.startsWith('--')) return urlArg.replace(/\/$/, '')
+  const fromFlag = process.argv.find(a => a.startsWith('--url='))?.split('=')[1]
+  const idx = process.argv.indexOf('--url')
+  const fromNext = idx !== -1 ? process.argv[idx + 1] : null
+  const urlArg = fromFlag ?? (fromNext && !fromNext.startsWith('--') ? fromNext : null)
+  if (urlArg) return urlArg.replace(/\/$/, '')
   return (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 })()
 
