@@ -1842,21 +1842,24 @@ async function main() {
     return true
   })
 
-  // Upsert in batches of 20
-  let upserted = 0
+  // Clear existing rows then insert fresh
+  console.log('Clearing existing rows...')
+  await supabase.from('known_offenders').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+
+  let inserted = 0
   for (let i = 0; i < deduped.length; i += 20) {
     const batch = deduped.slice(i, i + 20)
     const { data, error } = await supabase
       .from('known_offenders')
-      .upsert(batch as never, { onConflict: 'name' })
+      .insert(batch as never)
       .select('id, name')
 
     if (error) { console.error(`Batch error (${i}):`, error.message); continue }
-    upserted += data?.length ?? 0
-    process.stdout.write(`  Upserted ${upserted}/${deduped.length}...\r`)
+    inserted += data?.length ?? 0
+    process.stdout.write(`  Inserted ${inserted}/${deduped.length}...\r`)
   }
 
-  console.log(`\n✓ Done — ${upserted} offender profiles seeded\n`)
+  console.log(`\n✓ Done — ${inserted} offender profiles seeded\n`)
 }
 
 main().catch(e => { console.error(e); process.exit(1) })
