@@ -125,7 +125,8 @@ function scoreMoKeywords(text: string, moKeywords: string[]): { score: number; m
     const patterns = MO_KEYWORD_MAP[kw] ?? [kw.replace(/_/g, ' ')]
     if (patterns.some(p => t.includes(p.toLowerCase()))) matched.push(kw)
   }
-  const score = matched.length === 0 ? 0 : matched.length === 1 ? 2 : matched.length === 2 ? 4 : 5
+  // 1 match = 10, 2 = 16, 3+ = 22 (max)
+  const score = matched.length === 0 ? 0 : matched.length === 1 ? 10 : matched.length === 2 ? 16 : 22
   return { score, matched }
 }
 
@@ -164,17 +165,17 @@ function scoreSubmission(
     if (off.active_from && off.active_to) {
       const buffer = 3 // allow 3-year window either side
       if (sub.year >= off.active_from - buffer && sub.year <= off.active_to + buffer) {
-        temporal = sub.year >= off.active_from && sub.year <= off.active_to ? 20 : 10
+        temporal = sub.year >= off.active_from && sub.year <= off.active_to ? 15 : 8
       } else {
         temporal = 0
       }
     } else if (off.active_from) {
-      temporal = sub.year >= off.active_from ? 15 : 5
+      temporal = sub.year >= off.active_from ? 12 : 4
     } else {
-      temporal = 10
+      temporal = 8
     }
   } else {
-    temporal = 10 // unknown year — partial credit
+    temporal = 8 // unknown year — partial credit
   }
 
   // ── Geographic scores ─────────────────────────────────────────────────────
@@ -188,8 +189,8 @@ function scoreSubmission(
     const opMatch      = opStates.includes(sub.state)
     const victimMatch  = victimStates.includes(sub.state)
 
-    predGeo = homeMatch ? 25 : opMatch ? 15 : 0
-    vicGeo  = victimMatch ? 20 : opMatch ? 8 : 0
+    predGeo = homeMatch ? 20 : opMatch ? 12 : 0
+    vicGeo  = victimMatch ? 15 : opMatch ? 6 : 0
   }
 
   // ── Sex ───────────────────────────────────────────────────────────────────
@@ -199,19 +200,19 @@ function scoreSubmission(
     else if (off.victim_sex === sub.sex) sexScore = 15
     else return null // sex mismatch — hard eliminate
   } else {
-    sexScore = 7 // unknown
+    sexScore = 6 // unknown
   }
 
   // ── Age decay curve ───────────────────────────────────────────────────────
   let ageScore = 0
   if (sub.age !== null && off.victim_age_typical !== null) {
     const diff = Math.abs(sub.age - off.victim_age_typical)
-    ageScore = diff <= 3 ? 10 : diff <= 7 ? 7 : diff <= 12 ? 3 : diff <= 18 ? 1 : 0
+    ageScore = diff <= 3 ? 8 : diff <= 7 ? 5 : diff <= 12 ? 2 : diff <= 18 ? 1 : 0
   } else if (sub.age !== null && off.victim_age_min !== null && off.victim_age_max !== null) {
     const inRange = sub.age >= off.victim_age_min - 5 && sub.age <= off.victim_age_max + 5
-    ageScore = inRange ? 7 : 0
+    ageScore = inRange ? 5 : 0
   } else {
-    ageScore = 4 // unknown age
+    ageScore = 3 // unknown age
   }
 
   // ── Race ──────────────────────────────────────────────────────────────────

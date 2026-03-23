@@ -151,13 +151,13 @@ function OffenderCases({ offenderId, caseId, minScore }: { offenderId: string; c
             </div>
           </div>
           <div className="mt-2 space-y-0.5">
-            <ScoreBar label="Temporal" score={overlap.temporal_score} max={20} />
-            <ScoreBar label="Predator geo" score={overlap.predator_geo_score} max={25} />
-            <ScoreBar label="Victim geo" score={overlap.victim_geo_score} max={20} />
+            <ScoreBar label="MO match" score={overlap.mo_score} max={22} />
+            <ScoreBar label="Predator geo" score={overlap.predator_geo_score} max={20} />
             <ScoreBar label="Sex" score={overlap.victim_sex_score} max={15} />
-            <ScoreBar label="Age" score={overlap.victim_age_score} max={10} />
+            <ScoreBar label="Victim geo" score={overlap.victim_geo_score} max={15} />
+            <ScoreBar label="Temporal" score={overlap.temporal_score} max={15} />
+            <ScoreBar label="Age" score={overlap.victim_age_score} max={8} />
             <ScoreBar label="Race" score={overlap.victim_race_score} max={5} />
-            <ScoreBar label="MO" score={overlap.mo_score} max={5} />
           </div>
         </div>
       ))}
