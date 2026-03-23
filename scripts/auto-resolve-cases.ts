@@ -279,7 +279,7 @@ async function main() {
       if (result.resolution_notes) console.log(`   → ${result.resolution_notes}`)
 
       let offenderId: string | null = null
-      if (result.perpetrator) {
+      if (result.perpetrator?.name) {
         console.log(`   → perpetrator: ${result.perpetrator.name}`)
         offenderId = await upsertOffender(result.perpetrator)
         if (offenderId && offenderId !== '__dry_run__') offendersAdded++
