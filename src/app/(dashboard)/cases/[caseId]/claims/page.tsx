@@ -2,7 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { ClaimCard } from '@/components/claims/ClaimCard'
 import { ClaimFilters } from '@/components/claims/ClaimFilters'
-import { FileText } from 'lucide-react'
+import { FileText, Inbox } from 'lucide-react'
+import Link from 'next/link'
 import type { ClaimWithLinks } from '@/lib/types'
 
 export default async function ClaimsPage({
@@ -48,10 +49,19 @@ export default async function ClaimsPage({
     return (
       <div className="p-6 max-w-5xl mx-auto">
         <h1 className="text-xl font-bold text-slate-900 mb-2">Claims</h1>
-        <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-lg">
+        <div className="text-center py-16 border-2 border-dashed border-slate-200 rounded-lg">
           <FileText className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-          <p className="font-medium text-slate-600">No claims yet</p>
-          <p className="text-sm text-slate-400 mt-1">Review submissions to extract claims.</p>
+          <p className="font-semibold text-slate-700 text-base">No claims yet</p>
+          <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+            Claims are extracted from submissions during the review process. Open a submission, highlight a sentence, and save it as a claim.
+          </p>
+          <Link
+            href={`/cases/${caseId}/submissions`}
+            className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            <Inbox className="h-4 w-4" />
+            Go to submissions
+          </Link>
         </div>
       </div>
     )

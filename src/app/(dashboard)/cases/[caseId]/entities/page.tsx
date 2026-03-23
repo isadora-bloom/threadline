@@ -27,7 +27,7 @@ export default async function EntitiesPage({
       <div className="mb-6">
         <h1 className="text-xl font-bold text-slate-900">Entity Registry</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          People, locations, vehicles, and identifiers surfaced across submissions.
+          People, locations, vehicles, phones, and identifiers extracted from submissions. Entities are created during the review process or added manually — they form the backbone of pattern analysis.
         </p>
       </div>
 

@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { ReviewDashboardClient } from '@/components/submissions/ReviewDashboardClient'
+import Link from 'next/link'
+import { Lock } from 'lucide-react'
 
 export default async function ReviewDashboardPage({
   params,
@@ -26,8 +28,20 @@ export default async function ReviewDashboardPage({
   // Only lead_investigator and admin can view this
   if (!['lead_investigator', 'admin'].includes(userRole)) {
     return (
-      <div className="p-6 max-w-2xl mx-auto text-center py-20">
-        <p className="text-slate-500">You need lead investigator or admin access to view the review dashboard.</p>
+      <div className="p-6 max-w-2xl mx-auto flex flex-col items-center justify-center py-24 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 mb-4">
+          <Lock className="h-6 w-6 text-slate-400" />
+        </div>
+        <h2 className="text-lg font-semibold text-slate-900 mb-2">Access restricted</h2>
+        <p className="text-sm text-slate-500 max-w-sm">
+          The Review Dashboard is only visible to lead investigators and admins. If you need access, contact your case lead.
+        </p>
+        <Link
+          href={`/cases/${caseId}`}
+          className="mt-6 inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800"
+        >
+          ← Back to case overview
+        </Link>
       </div>
     )
   }

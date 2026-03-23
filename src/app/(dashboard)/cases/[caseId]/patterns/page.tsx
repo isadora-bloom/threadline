@@ -35,6 +35,9 @@ import {
   GitMerge,
   Globe,
   ShieldAlert,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
@@ -49,6 +52,7 @@ export default function PatternIntelligencePage() {
   const [isRunningAnalysis, setIsRunningAnalysis] = useState(false)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [roleLoaded, setRoleLoaded] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -255,6 +259,34 @@ export default function PatternIntelligencePage() {
         </div>
       )}
 
+      {/* Help banner */}
+      <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <button
+          onClick={() => setHelpOpen(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-sm text-slate-600"
+        >
+          <span className="flex items-center gap-2">
+            <HelpCircle className="h-4 w-4 text-slate-400" />
+            <span className="font-medium">What is Pattern Intelligence?</span>
+          </span>
+          {helpOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+        </button>
+        {helpOpen && (
+          <div className="px-4 py-3 bg-white border-t border-slate-200 text-xs text-slate-600 space-y-1.5">
+            <p><span className="font-semibold text-slate-700">Flags:</span> Automated signals surfaced from comparing submissions to each other. Not findings — review each one.</p>
+            <p><span className="font-semibold text-slate-700">Connection Scores:</span> Pairwise similarity between submissions. High scores = similar content, people, or locations.</p>
+            <p><span className="font-semibold text-slate-700">Travel Routes:</span> Submissions that mention known travel corridors or interstates. Useful for hitchhiker and highway cases.</p>
+            <p><span className="font-semibold text-slate-700">Social Network:</span> Visual web of people and entities mentioned across submissions.</p>
+            <p><span className="font-semibold text-slate-700">Cross-Case Links:</span> Signals shared between this case and other cases in the system.</p>
+            <p><span className="font-semibold text-slate-700">Threads:</span> AI-drafted investigative questions and leads for human follow-up.</p>
+            <p><span className="font-semibold text-slate-700">Research Tasks:</span> Manual and AI-assisted open-source research tasks.</p>
+            <p><span className="font-semibold text-slate-700">Remains Match:</span> Cross-references missing person submissions against unidentified remains records (Doe Network).</p>
+            <p><span className="font-semibold text-slate-700">Map View:</span> Geographic clustering of locations mentioned across submissions.</p>
+            <p><span className="font-semibold text-slate-700">Known Offenders:</span> Pattern overlap between this case and convicted serial offenders. Statistical only — not an accusation.</p>
+          </div>
+        )}
+      </div>
+
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         {roleLoaded && (
@@ -270,20 +302,20 @@ export default function PatternIntelligencePage() {
           </TabsTrigger>
           <TabsTrigger value="links" className="text-xs">
             <Link2 className="h-3.5 w-3.5 mr-1" />
-            Links
+            Connection Scores
           </TabsTrigger>
           <TabsTrigger value="corridor" className="text-xs">
             <Navigation className="h-3.5 w-3.5 mr-1" />
-            Corridor
+            Travel Routes
           </TabsTrigger>
           <TabsTrigger value="network" className="text-xs">
             <Users className="h-3.5 w-3.5 mr-1" />
-            Network
+            Social Network
           </TabsTrigger>
           {canRunAnalysis && (
             <TabsTrigger value="cross-case" className="text-xs">
               <Layers className="h-3.5 w-3.5 mr-1" />
-              Cross-Case
+              Cross-Case Links
             </TabsTrigger>
           )}
           <TabsTrigger value="threads" className="text-xs">
@@ -292,19 +324,19 @@ export default function PatternIntelligencePage() {
           </TabsTrigger>
           <TabsTrigger value="research" className="text-xs">
             <Microscope className="h-3.5 w-3.5 mr-1" />
-            Research
+            Research Tasks
           </TabsTrigger>
           <TabsTrigger value="doe-match" className="text-xs">
             <GitMerge className="h-3.5 w-3.5 mr-1" />
-            Match
+            Remains Match
           </TabsTrigger>
           <TabsTrigger value="geo" className="text-xs">
             <Globe className="h-3.5 w-3.5 mr-1" />
-            Geographic
+            Map View
           </TabsTrigger>
           <TabsTrigger value="offenders" className="text-xs">
             <ShieldAlert className="h-3.5 w-3.5 mr-1" />
-            Offenders
+            Known Offenders
           </TabsTrigger>
         </TabsList>
         )}

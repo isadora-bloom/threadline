@@ -152,6 +152,60 @@ export default async function CaseDashboardPage({
         })}
       </div>
 
+      {/* Getting started guide — only show when no submissions yet */}
+      {(submissionsRes.count === 0) && (
+        <div className="border-l-4 border-indigo-500 bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+          <h2 className="text-base font-semibold text-slate-900 mb-4">Getting started with this case</h2>
+          <ol className="space-y-4">
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 text-xs font-bold">1</span>
+              <div>
+                <p className="text-sm font-medium text-slate-800">Generate a public submission link</p>
+                <p className="text-xs text-slate-500 mt-0.5">Share it with witnesses, family members, or your team so they can submit information.</p>
+                <Link href={`/cases/${caseId}/settings`} className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 inline-block">
+                  → Go to Settings
+                </Link>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 text-xs font-bold">2</span>
+              <div>
+                <p className="text-sm font-medium text-slate-800">Add submissions yourself</p>
+                <p className="text-xs text-slate-500 mt-0.5">Use Quick Capture in the sidebar or add submissions manually.</p>
+                <Link href={`/cases/${caseId}/submissions`} className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 inline-flex items-center gap-1">
+                  <Plus className="h-3 w-3" />
+                  Add a submission
+                </Link>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 text-xs font-bold">3</span>
+              <div>
+                <p className="text-sm font-medium text-slate-800">Triage incoming submissions</p>
+                <p className="text-xs text-slate-500 mt-0.5">Once submissions arrive, triage them: claim the ones you&apos;ll review, defer others, discard junk.</p>
+                <Link href={`/cases/${caseId}/submissions/triage`} className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 inline-block">
+                  → Open triage queue
+                </Link>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 text-xs font-bold">4</span>
+              <div>
+                <p className="text-sm font-medium text-slate-800">Review and extract claims</p>
+                <p className="text-xs text-slate-500 mt-0.5">Open each submission and extract specific, factual claims from the text. This builds your evidence base.</p>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 text-xs font-bold">5</span>
+              <div>
+                <p className="text-sm font-medium text-slate-800">Run pattern analysis</p>
+                <p className="text-xs text-slate-500 mt-0.5">Once you have claims and entities, run pattern analysis to surface connections and overlaps.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      )}
+
       {/* Pattern alerts — only show if notable+ unreviewed flags exist */}
       {notablePatternFlagCount > 0 && (
         <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4">

@@ -80,6 +80,16 @@ export default async function SubmissionsPage({
           <p className="text-sm text-slate-500 mt-0.5">
             {allSubmissions.length} total submissions
           </p>
+          {allSubmissions.length === 0 && (
+            <p className="text-xs text-slate-400 mt-1">
+              No submissions yet. Add one manually, or share a public submission link with witnesses and tip providers.
+            </p>
+          )}
+          {allSubmissions.length > 0 && (
+            <p className="text-xs text-slate-400 mt-1">
+              Step 1: triage (claim or discard). Step 2: open and extract claims from each submission.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <QuickCapture caseId={caseId} />

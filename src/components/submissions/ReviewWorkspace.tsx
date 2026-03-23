@@ -1002,7 +1002,7 @@ export function ReviewWorkspace({
                       {/* Two separate confidence selectors */}
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <Label className="text-[11px] text-slate-500 mb-1 block">Source reliability</Label>
+                          <Label className="text-[11px] text-slate-500 mb-1 block">Source confidence</Label>
                           <Select
                             value={draft.source_confidence}
                             onValueChange={v => setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, source_confidence: v as ConfidenceLevel } : d))}
@@ -1016,9 +1016,10 @@ export function ReviewWorkspace({
                               <SelectItem value="high">High</SelectItem>
                             </SelectContent>
                           </Select>
+                          <p className="text-[10px] text-slate-400 mt-0.5">How reliable is the person who submitted this? (on-record = highest)</p>
                         </div>
                         <div>
-                          <Label className="text-[11px] text-slate-500 mb-1 block">Claim certainty</Label>
+                          <Label className="text-[11px] text-slate-500 mb-1 block">Content confidence</Label>
                           <Select
                             value={draft.content_confidence}
                             onValueChange={v => setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, content_confidence: v as ConfidenceLevel } : d))}
@@ -1032,25 +1033,31 @@ export function ReviewWorkspace({
                               <SelectItem value="high">High</SelectItem>
                             </SelectContent>
                           </Select>
+                          <p className="text-[10px] text-slate-400 mt-0.5">How accurate do you think this specific claim is, based on what you know?</p>
                         </div>
                       </div>
 
                       {/* Interpretation flag */}
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={`interp-${draft.id}`}
-                          checked={draft.interpretation_flag}
-                          onCheckedChange={checked => setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, interpretation_flag: !!checked } : d))}
-                        />
-                        <Label htmlFor={`interp-${draft.id}`} className="text-xs cursor-pointer">
-                          Interpretation, not a direct observation
-                        </Label>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={`interp-${draft.id}`}
+                            checked={draft.interpretation_flag}
+                            onCheckedChange={checked => setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, interpretation_flag: !!checked } : d))}
+                          />
+                          <Label htmlFor={`interp-${draft.id}`} className="text-xs cursor-pointer">
+                            Interpretation, not a direct observation
+                          </Label>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Check this if the submitter is drawing conclusions rather than reporting observed facts.</p>
                       </div>
 
                       {/* Behavioral category (collapsible if type is behavioral) */}
                       {draft.claim_type === 'behavioral' && (
                         <div>
-                          <Label className="text-[11px] text-slate-500 mb-1 block">Behavioral category</Label>
+                          <Label className="text-[11px] text-slate-500 mb-1 block">
+                            Behavioral category <span className="text-slate-400 font-normal">(for behaviorally significant claims only)</span>
+                          </Label>
                           <Select
                             value={draft.behavioral_category}
                             onValueChange={v => setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, behavioral_category: v } : d))}

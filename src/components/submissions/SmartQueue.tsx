@@ -392,6 +392,18 @@ export function SmartQueue({
     router.refresh()
   }
 
+  if (submissions.length === 0) {
+    return (
+      <div className="text-center py-16 border-2 border-dashed border-slate-200 rounded-lg">
+        <Inbox className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+        <p className="font-semibold text-slate-700">No submissions yet</p>
+        <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+          Add submissions manually using Quick Capture in the sidebar, or share a public submission link with witnesses and tip providers.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       {/* Queue stats bar */}
