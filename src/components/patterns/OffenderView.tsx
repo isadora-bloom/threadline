@@ -18,6 +18,7 @@ import {
   User,
   ShieldAlert,
   ArrowRight,
+  CheckCircle2,
 } from 'lucide-react'
 
 interface Offender {
@@ -59,6 +60,7 @@ interface OffenderOverlap {
   victim_race_score: number
   mo_score: number
   matched_mo_keywords: string[]
+  resolution_confirmed: boolean
   preview: string
 }
 
@@ -123,7 +125,13 @@ function OffenderCases({ offenderId, caseId, minScore }: { offenderId: string; c
   return (
     <div className="divide-y divide-slate-100">
       {data.map((overlap) => (
-        <div key={overlap.submission_id} className="p-3 hover:bg-slate-50">
+        <div key={overlap.submission_id} className={`p-3 ${overlap.resolution_confirmed ? 'bg-green-50' : 'hover:bg-slate-50'}`}>
+          {overlap.resolution_confirmed && (
+            <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold text-green-700 uppercase tracking-wide">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Confirmed connection — conviction on record
+            </div>
+          )}
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">{overlap.preview || '(no preview)'}</p>

@@ -62,6 +62,7 @@ interface OffenderOverlap {
   victim_geo_score: number
   mo_score: number
   matched_mo_keywords: string[]
+  resolution_confirmed: boolean
   offender: {
     id: string
     name: string
@@ -259,7 +260,13 @@ export function SubmissionLinksPanel({ submissionId, caseId }: SubmissionLinksPa
         ) : (
           <div className="divide-y divide-slate-100">
             {offenders.map(o => (
-              <div key={o.offender_id} className="px-3 py-2.5">
+              <div key={o.offender_id} className={`px-3 py-2.5 ${o.resolution_confirmed ? 'bg-green-50' : ''}`}>
+                {o.resolution_confirmed && (
+                  <div className="flex items-center gap-1.5 mb-1.5 text-[10px] font-semibold text-green-700 uppercase tracking-wide">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Confirmed connection — conviction on record
+                  </div>
+                )}
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">

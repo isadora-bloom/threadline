@@ -81,6 +81,22 @@ export function CaseSettings({
   const [notes, setNotes] = useState(caseData.notes ?? '')
   const [resolutionType, setResolutionType] = useState<string>((caseData as Record<string, unknown>).resolution_type as string ?? '')
   const [resolutionNotes, setResolutionNotes] = useState<string>((caseData as Record<string, unknown>).resolution_notes as string ?? '')
+  const [convictedOffenderId, setConvictedOffenderId] = useState<string>((caseData as Record<string, unknown>).convicted_offender_id as string ?? '')
+
+  const showOffenderPicker = resolutionType === 'perpetrator_convicted' || resolutionType === 'perpetrator_identified'
+
+  const { data: knownOffenders } = useQuery({
+    queryKey: ['known-offenders-list'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('known_offenders')
+        .select('id, name, active_from, active_to, status')
+        .order('name')
+      return data ?? []
+    },
+    enabled: showOffenderPicker,
+    staleTime: 10 * 60 * 1000,
+  })
 
   // Legal hold
   const [legalHold, setLegalHold] = useState(caseData.legal_hold ?? false)
@@ -119,6 +135,7 @@ export function CaseSettings({
           notes: notes || null,
           resolution_type: resolutionType || null,
           resolution_notes: resolutionNotes || null,
+          convicted_offender_id: convictedOffenderId || null,
           resolved_at: resolutionType && !(caseData as Record<string, unknown>).resolution_type ? new Date().toISOString() : undefined,
         })
         .eq('id', caseId)
@@ -276,6 +293,37 @@ export function CaseSettings({
                     placeholder="Optional — e.g. remains identified via DNA, perpetrator convicted 1995…"
                     className="min-h-[60px] text-sm"
                   />
+                </div>
+              )}
+              {showOffenderPicker && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-500">
+                    Convicted offender
+                    <span className="ml-1 text-slate-400">(links to known offenders database — enables confirmed match flagging)</span>
+                  </Label>
+                  <Select
+                    value={convictedOffenderId || '__none__'}
+                    onValueChange={(v) => setConvictedOffenderId(v === '__none__' ? '' : v)}
+                    disabled={!canManage}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select offender from database…" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-64">
+                      <SelectItem value="__none__">Not in database / unknown</SelectItem>
+                      {(knownOffenders ?? []).map(o => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.name}
+                          {o.active_from ? ` (${o.active_from}–${o.active_to ?? '?'})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {convictedOffenderId && (
+                    <p className="text-[10px] text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
+                      Offender linked — re-run the match script to flag confirmed overlaps across all submissions.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

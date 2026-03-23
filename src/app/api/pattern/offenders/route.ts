@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from('offender_case_overlaps' as never)
-      .select('submission_id,case_id,composite_score,temporal_score,predator_geo_score,victim_geo_score,victim_sex_score,victim_age_score,victim_race_score,mo_score,matched_mo_keywords')
+      .select('submission_id,case_id,composite_score,temporal_score,predator_geo_score,victim_geo_score,victim_sex_score,victim_age_score,victim_race_score,mo_score,matched_mo_keywords,resolution_confirmed')
       .eq('offender_id', offenderId as never)
       .eq('case_id', caseId as never)
       .gte('composite_score', minScore as never)
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
 
     const { data: overlaps } = await supabase
       .from('offender_case_overlaps' as never)
-      .select('offender_id,composite_score,temporal_score,predator_geo_score,victim_geo_score,victim_sex_score,victim_age_score,victim_race_score,mo_score,matched_mo_keywords')
+      .select('offender_id,composite_score,temporal_score,predator_geo_score,victim_geo_score,victim_sex_score,victim_age_score,victim_race_score,mo_score,matched_mo_keywords,resolution_confirmed')
       .eq('submission_id', submissionId)
       .order('composite_score', { ascending: false })
       .limit(10) as { data: Array<Record<string, unknown>> | null }

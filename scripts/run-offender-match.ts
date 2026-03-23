@@ -245,22 +245,61 @@ async function main() {
   if (offErr || !offenders?.length) { console.error('Could not load offenders:', offErr); process.exit(1) }
   console.log(`Loaded ${offenders.length} offenders`)
 
-  // Find Doe Network cases
-  const { data: cases } = await supabase.from('cases').select('id, title').ilike('title', '%Doe Network%')
-  if (!cases?.length) { console.error('No Doe Network cases found'); process.exit(1) }
-  cases.forEach(c => console.log(`  · ${c.title}`))
+  // Find Doe Network cases — include resolution fields (with graceful fallback if migrations not yet run)
+  let cases: Array<{ id: string; title: string; resolution_type: string | null; convicted_offender_id: string | null }> | null = null
 
-  // Clear existing overlaps for these cases
+  const { data: casesWithRes, error: resErr } = await supabase
+    .from('cases')
+    .select('id, title, resolution_type, convicted_offender_id')
+    .ilike('title', '%Doe Network%') as {
+      data: Array<{ id: string; title: string; resolution_type: string | null; convicted_offender_id: string | null }> | null
+      error: { message?: string } | null
+    }
+
+  if (resErr) {
+    // Migrations 017/018 not yet run — fall back to base columns
+    console.warn(`  Note: resolution columns not found (${resErr.message}) — run migrations 017 & 018 in Supabase to enable resolution-aware matching`)
+    const { data: casesBase } = await supabase
+      .from('cases')
+      .select('id, title')
+      .ilike('title', '%Doe Network%')
+    cases = (casesBase ?? []).map(c => ({ ...c, resolution_type: null, convicted_offender_id: null }))
+  } else {
+    cases = casesWithRes
+  }
+
+  if (!cases?.length) { console.error('No Doe Network cases found'); process.exit(1) }
+
+  // Cases where matching is meaningless — person found alive or duplicate entry
+  const SKIP_RESOLUTIONS = new Set(['found_alive', 'duplicate_case'])
+  const activeCases    = cases.filter(c => !SKIP_RESOLUTIONS.has(c.resolution_type ?? ''))
+  const skippedCases   = cases.filter(c =>  SKIP_RESOLUTIONS.has(c.resolution_type ?? ''))
+
+  activeCases.forEach(c => console.log(`  · ${c.title}${c.resolution_type ? ` [${c.resolution_type}]` : ''}`))
+  if (skippedCases.length) {
+    console.log(`  Skipping ${skippedCases.length} case(s) — resolved as found_alive or duplicate:`)
+    skippedCases.forEach(c => console.log(`    - ${c.title}`))
+  }
+
+  // Build map: caseId → convicted_offender_id (for confirmed flagging)
+  const convictedMap = new Map<string, string>()
+  for (const c of activeCases) {
+    if (c.convicted_offender_id) convictedMap.set(c.id, c.convicted_offender_id)
+  }
+
+  const allCaseIds = cases.map(c => c.id)
+  const activeCaseIds = activeCases.map(c => c.id)
+
+  // Clear existing overlaps for ALL these cases
   if (!isDryRun) {
-    const caseIds = cases.map(c => c.id)
-    await supabase.from('offender_case_overlaps' as never).delete().in('case_id', caseIds as never)
+    await supabase.from('offender_case_overlaps' as never).delete().in('case_id', allCaseIds as never)
     console.log('Cleared existing overlaps')
   }
 
-  // Process submissions in batches
-  let totalProcessed = 0, totalMatches = 0, from = 0
+  // Process submissions in batches (active cases only)
+  let totalProcessed = 0, totalMatches = 0, totalConfirmed = 0, from = 0
   const toInsert: Record<string, unknown>[] = []
-  const caseIds = cases.map(c => c.id)
+  const caseIds = activeCaseIds
 
   while (true) {
     const { data: subs } = await supabase
@@ -286,6 +325,8 @@ async function main() {
         const scores = scoreSubmission(parsed, off)
         if (!scores || scores.composite < MIN_SCORE) continue
 
+        const isConfirmed = convictedMap.get(sub.case_id) === off.id
+
         toInsert.push({
           offender_id:              off.id,
           submission_id:            sub.id,
@@ -299,8 +340,10 @@ async function main() {
           victim_race_score:        scores.raceScore,
           mo_score:                 scores.moScore,
           matched_mo_keywords:      scores.matchedMo,
+          resolution_confirmed:     isConfirmed,
         })
         totalMatches++
+        if (isConfirmed) totalConfirmed++
       }
       totalProcessed++
     }
@@ -323,8 +366,10 @@ async function main() {
   }
 
   console.log(`\n\n── Results ────────────────────────────────────────────────────────`)
+  console.log(`  Cases processed:       ${activeCases.length} (${skippedCases.length} skipped — resolved)`)
   console.log(`  Submissions processed: ${totalProcessed.toLocaleString()}`)
   console.log(`  Overlaps found (≥${MIN_SCORE}): ${totalMatches.toLocaleString()}`)
+  console.log(`  Confirmed connections: ${totalConfirmed.toLocaleString()}`)
   if (isDryRun) console.log('\n[DRY RUN] No rows written.')
   console.log()
 }
