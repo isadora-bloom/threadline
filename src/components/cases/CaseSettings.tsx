@@ -258,11 +258,18 @@ export function CaseSettings({
             <Separator />
 
             <div className="space-y-3">
-              <div>
-                <Label className="text-sm font-medium">Case resolution</Label>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Record how this case was ultimately resolved. This will be shown in cross-reference panels across all linked cases.
-                </p>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <Label className="text-sm font-medium">Case resolution</Label>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Record how this case was ultimately resolved. This will be shown in cross-reference panels across all linked cases.
+                  </p>
+                </div>
+                {!resolutionType && canManage && (
+                  <p className="text-[10px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-2 py-1.5 flex-shrink-0 max-w-[200px]">
+                    Run <code className="font-mono">auto-resolve-cases.ts</code> to auto-detect from case description.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-slate-500">Resolution type</Label>
@@ -321,7 +328,7 @@ export function CaseSettings({
                   </Select>
                   {convictedOffenderId && (
                     <p className="text-[10px] text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
-                      Offender linked — re-run the match script to flag confirmed overlaps across all submissions.
+                      Offender linked. After saving, re-run <code className="font-mono">run-offender-match.ts</code> to flag confirmed connections across all submissions.
                     </p>
                   )}
                 </div>
