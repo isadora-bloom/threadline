@@ -16,6 +16,7 @@ import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads
 import { ResearchTaskList } from '@/components/research/ResearchTaskList'
 import { DoeMatchView } from '@/components/patterns/DoeMatchView'
 import { GeoView } from '@/components/patterns/GeoView'
+import { OffenderView } from '@/components/patterns/OffenderView'
 import { useToast } from '@/components/ui/use-toast'
 import { useParams } from 'next/navigation'
 import {
@@ -33,6 +34,7 @@ import {
   Microscope,
   GitMerge,
   Globe,
+  ShieldAlert,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
@@ -256,7 +258,7 @@ export default function PatternIntelligencePage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         {roleLoaded && (
-        <TabsList className={`grid w-full max-w-4xl ${canRunAnalysis ? 'grid-cols-9' : 'grid-cols-8'}`}>
+        <TabsList className={`grid w-full max-w-5xl ${canRunAnalysis ? 'grid-cols-10' : 'grid-cols-9'}`}>
           <TabsTrigger value="flags" className="text-xs">
             <Flag className="h-3.5 w-3.5 mr-1" />
             Flags
@@ -300,6 +302,10 @@ export default function PatternIntelligencePage() {
             <Globe className="h-3.5 w-3.5 mr-1" />
             Geographic
           </TabsTrigger>
+          <TabsTrigger value="offenders" className="text-xs">
+            <ShieldAlert className="h-3.5 w-3.5 mr-1" />
+            Offenders
+          </TabsTrigger>
         </TabsList>
         )}
 
@@ -339,6 +345,10 @@ export default function PatternIntelligencePage() {
 
         <TabsContent value="geo" className="mt-4">
           <GeoView caseId={caseId} />
+        </TabsContent>
+
+        <TabsContent value="offenders" className="mt-4">
+          <OffenderView caseId={caseId} />
         </TabsContent>
       </Tabs>
     </div>
