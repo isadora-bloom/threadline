@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ import {
   ArrowUpDown,
   User,
   ShieldAlert,
+  ArrowRight,
 } from 'lucide-react'
 
 interface Offender {
@@ -96,11 +98,11 @@ function ScoreBar({ label, score, max }: { label: string; score: number; max: nu
   )
 }
 
-function OffenderCases({ offenderId }: { offenderId: string }) {
+function OffenderCases({ offenderId, caseId, minScore }: { offenderId: string; caseId: string; minScore: number }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['offender-cases', offenderId],
+    queryKey: ['offender-cases', offenderId, caseId, minScore],
     queryFn: async () => {
-      const res = await fetch(`/api/pattern/offenders?type=offender_cases&offenderId=${offenderId}&limit=20`)
+      const res = await fetch(`/api/pattern/offenders?type=offender_cases&offenderId=${offenderId}&caseId=${caseId}&minScore=${minScore}&limit=30`)
       if (!res.ok) throw new Error('Failed to load')
       const json = await res.json()
       return json.overlaps as OffenderOverlap[]
@@ -110,17 +112,17 @@ function OffenderCases({ offenderId }: { offenderId: string }) {
   if (isLoading) return (
     <div className="flex items-center gap-2 p-4 text-slate-500 text-sm">
       <Loader2 className="h-4 w-4 animate-spin" />
-      Loading overlapping cases...
+      Loading overlapping submissions...
     </div>
   )
 
   if (!data?.length) return (
-    <p className="p-4 text-sm text-slate-500">No overlapping cases found above threshold.</p>
+    <p className="p-4 text-sm text-slate-500">No submissions in this case meet the overlap threshold.</p>
   )
 
   return (
     <div className="divide-y divide-slate-100">
-      {data.map((overlap, i) => (
+      {data.map((overlap) => (
         <div key={overlap.submission_id} className="p-3 hover:bg-slate-50">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
@@ -135,9 +137,17 @@ function OffenderCases({ offenderId }: { offenderId: string }) {
                 </div>
               )}
             </div>
-            <div className="flex-shrink-0 text-right">
-              <span className="text-base font-bold text-indigo-700">{Math.round(overlap.composite_score)}</span>
-              <span className="text-xs text-slate-400">/100</span>
+            <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+              <div className="text-right">
+                <span className="text-base font-bold text-indigo-700">{Math.round(overlap.composite_score)}</span>
+                <span className="text-xs text-slate-400">/100</span>
+              </div>
+              <Link
+                href={`/cases/${overlap.case_id}/submissions/${overlap.submission_id}`}
+                className="flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium"
+              >
+                View submission <ArrowRight className="h-3 w-3" />
+              </Link>
             </div>
           </div>
           <div className="mt-2 space-y-0.5">
@@ -155,7 +165,7 @@ function OffenderCases({ offenderId }: { offenderId: string }) {
   )
 }
 
-function OffenderCard({ offender }: { offender: Offender }) {
+function OffenderCard({ offender, caseId, minScore }: { offender: Offender; caseId: string; minScore: number }) {
   const [expanded, setExpanded] = useState(false)
 
   const activeYears = offender.active_from
@@ -313,15 +323,15 @@ function OffenderCard({ offender }: { offender: Offender }) {
             {offender.overlap_count > 0 && (
               <div className="border-t border-slate-100">
                 <p className="px-4 py-2 text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  Top overlapping submissions ({offender.overlap_count} total)
+                  Overlapping submissions ({offender.overlap_count} above threshold)
                 </p>
-                <OffenderCases offenderId={offender.id} />
+                <OffenderCases offenderId={offender.id} caseId={caseId} minScore={minScore} />
               </div>
             )}
 
             {offender.overlap_count === 0 && (
               <p className="px-4 pb-3 text-xs text-slate-400 italic">
-                No submissions from this case met the overlap threshold for this offender.
+                No submissions in this case met the overlap threshold for this offender.
               </p>
             )}
           </div>
@@ -331,19 +341,28 @@ function OffenderCard({ offender }: { offender: Offender }) {
   )
 }
 
+const SCORE_OPTIONS = [
+  { label: '50+', value: 50 },
+  { label: '60+', value: 60 },
+  { label: '65+', value: 65 },
+  { label: '75+', value: 75 },
+  { label: '85+', value: 85 },
+]
+
 export function OffenderView({ caseId }: { caseId: string }) {
   const [sortKey, setSortKey] = useState<SortKey>('overlap_count')
   const [showOnlyOverlaps, setShowOnlyOverlaps] = useState(true)
+  const [minScore, setMinScore] = useState(65)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['offender-list'],
+    queryKey: ['offender-list', caseId, minScore],
     queryFn: async () => {
-      const res = await fetch('/api/pattern/offenders?type=list')
+      const res = await fetch(`/api/pattern/offenders?type=list&caseId=${caseId}&minScore=${minScore}`)
       if (!res.ok) throw new Error('Failed to load offenders')
       const json = await res.json()
       return json.offenders as Offender[]
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
   })
 
   const sorted = [...(data ?? [])].sort((a, b) => {
@@ -401,6 +420,23 @@ export function OffenderView({ caseId }: { caseId: string }) {
           ))}
         </div>
 
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-slate-500">Min score:</span>
+          {SCORE_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setMinScore(opt.value)}
+              className={`text-xs px-2 py-1 rounded ${
+                minScore === opt.value
+                  ? 'bg-indigo-100 text-indigo-700 font-medium'
+                  : 'text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer ml-auto">
           <input
             type="checkbox"
@@ -427,7 +463,7 @@ export function OffenderView({ caseId }: { caseId: string }) {
       ) : (
         <div className="space-y-2">
           {filtered.map(offender => (
-            <OffenderCard key={offender.id} offender={offender} />
+            <OffenderCard key={offender.id} offender={offender} caseId={caseId} minScore={minScore} />
           ))}
         </div>
       )}

@@ -29,7 +29,7 @@ const supabase = createClient(
 )
 
 const isDryRun = process.argv.includes('--dry-run')
-const MIN_SCORE = 50
+const MIN_SCORE = 65
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -225,8 +225,8 @@ function scoreSubmission(
   // ── MO keywords ───────────────────────────────────────────────────────────
   const { score: moScore, matched: matchedMo } = scoreMoKeywords(sub.text, off.mo_keywords)
 
-  // Require at least some geographic signal — pure temporal/demographic matches are too noisy
-  if (predGeo === 0 && vicGeo === 0) return null
+  // Require predator geographic signal — victim-state-only matches are too weak
+  if (predGeo === 0) return null
 
   const composite = temporal + predGeo + vicGeo + sexScore + ageScore + raceScore + moScore
   return { composite, temporal, predGeo, vicGeo, sexScore, ageScore, raceScore, moScore, matchedMo }

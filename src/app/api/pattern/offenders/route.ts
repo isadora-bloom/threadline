@@ -11,17 +11,24 @@ export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams
   const type = params.get('type') ?? 'list'
 
-  // ── List all offenders with match counts ─────────────────────────────────
+  const caseId = params.get('caseId')
+  const minScore = parseInt(params.get('minScore') ?? '65')
+
+  // ── List all offenders with match counts (scoped to caseId) ──────────────
   if (type === 'list') {
+    if (!caseId) return NextResponse.json({ error: 'caseId required' }, { status: 400 })
+
     const { data: offenders } = await supabase
       .from('known_offenders')
       .select('id,name,aliases,birth_year,status,conviction_count,suspected_count,active_from,active_to,incarcerated_from,home_states,operation_states,victim_states,victim_sex,victim_races,victim_age_min,victim_age_max,victim_age_typical,mo_keywords,disposal_method,cause_of_death,signature_details,wikipedia_slug')
       .order('suspected_count', { ascending: false })
 
-    // Get match counts per offender
+    // Get match counts scoped to this case and above the score threshold
     const { data: counts } = await supabase
       .from('offender_case_overlaps' as never)
-      .select('offender_id') as { data: Array<{ offender_id: string }> | null }
+      .select('offender_id')
+      .eq('case_id', caseId as never)
+      .gte('composite_score', minScore as never) as { data: Array<{ offender_id: string }> | null }
 
     const countMap = new Map<string, number>()
     for (const row of counts ?? []) {
@@ -36,19 +43,24 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // ── Top cases for a specific offender ────────────────────────────────────
+  // ── Top submissions for a specific offender, scoped to case ──────────────
   if (type === 'offender_cases') {
     const offenderId = params.get('offenderId')
     if (!offenderId) return NextResponse.json({ error: 'offenderId required' }, { status: 400 })
+    if (!caseId) return NextResponse.json({ error: 'caseId required' }, { status: 400 })
 
-    const limit = parseInt(params.get('limit') ?? '50')
+    const limit = parseInt(params.get('limit') ?? '30')
 
-    const { data: overlaps } = await supabase
+    let query = supabase
       .from('offender_case_overlaps' as never)
       .select('submission_id,case_id,composite_score,temporal_score,predator_geo_score,victim_geo_score,victim_sex_score,victim_age_score,victim_race_score,mo_score,matched_mo_keywords')
-      .eq('offender_id', offenderId)
+      .eq('offender_id', offenderId as never)
+      .eq('case_id', caseId as never)
+      .gte('composite_score', minScore as never)
       .order('composite_score', { ascending: false })
-      .limit(limit) as { data: Array<Record<string, unknown>> | null }
+      .limit(limit)
+
+    const { data: overlaps } = await query as { data: Array<Record<string, unknown>> | null }
 
     if (!overlaps?.length) return NextResponse.json({ overlaps: [] })
 
