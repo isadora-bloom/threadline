@@ -296,21 +296,48 @@ async function main() {
     console.log('Cleared existing overlaps')
   }
 
+  // Resolution types that mean the submission-level person was found/resolved — skip matching
+  const SKIP_SUB_RESOLUTIONS = new Set(['found_alive', 'duplicate_case'])
+
   // Process submissions in batches (active cases only)
-  let totalProcessed = 0, totalMatches = 0, totalConfirmed = 0, from = 0
+  let totalProcessed = 0, totalMatches = 0, totalConfirmed = 0, totalSubSkipped = 0, from = 0
   const toInsert: Record<string, unknown>[] = []
   const caseIds = activeCaseIds
 
   while (true) {
-    const { data: subs } = await supabase
+    // Fetch with submission-level resolution fields (graceful if migration 019 not yet run)
+    let subs: Array<{ id: string; case_id: string; raw_text: string; resolution_type?: string | null; convicted_offender_id?: string | null }> | null = null
+
+    const { data: subsWithRes, error: subResErr } = await supabase
       .from('submissions')
-      .select('id, case_id, raw_text')
+      .select('id, case_id, raw_text, resolution_type, convicted_offender_id')
       .in('case_id', caseIds)
-      .range(from, from + 499)
+      .range(from, from + 499) as {
+        data: Array<{ id: string; case_id: string; raw_text: string; resolution_type: string | null; convicted_offender_id: string | null }> | null
+        error: { message?: string } | null
+      }
+
+    if (subResErr) {
+      // Migration 019 not yet applied — fall back without resolution columns
+      const { data: subsBase } = await supabase
+        .from('submissions')
+        .select('id, case_id, raw_text')
+        .in('case_id', caseIds)
+        .range(from, from + 499)
+      subs = (subsBase ?? []).map(s => ({ ...s, resolution_type: null, convicted_offender_id: null }))
+    } else {
+      subs = subsWithRes
+    }
 
     if (!subs?.length) break
 
     for (const sub of subs) {
+      // Skip if this individual person was found alive or is a duplicate
+      if (SKIP_SUB_RESOLUTIONS.has(sub.resolution_type ?? '')) {
+        totalSubSkipped++
+        continue
+      }
+
       const text = sub.raw_text ?? ''
       const parsed = {
         state: extractStateAbbr(text),
@@ -325,7 +352,10 @@ async function main() {
         const scores = scoreSubmission(parsed, off)
         if (!scores || scores.composite < MIN_SCORE) continue
 
-        const isConfirmed = convictedMap.get(sub.case_id) === off.id
+        // Confirmed if: case-level link OR submission-level link matches this offender
+        const isConfirmed =
+          convictedMap.get(sub.case_id) === off.id ||
+          sub.convicted_offender_id === off.id
 
         toInsert.push({
           offender_id:              off.id,
@@ -367,7 +397,7 @@ async function main() {
 
   console.log(`\n\n── Results ────────────────────────────────────────────────────────`)
   console.log(`  Cases processed:       ${activeCases.length} (${skippedCases.length} skipped — resolved)`)
-  console.log(`  Submissions processed: ${totalProcessed.toLocaleString()}`)
+  console.log(`  Submissions processed: ${totalProcessed.toLocaleString()} (${totalSubSkipped} skipped — resolved individuals)`)
   console.log(`  Overlaps found (≥${MIN_SCORE}): ${totalMatches.toLocaleString()}`)
   console.log(`  Confirmed connections: ${totalConfirmed.toLocaleString()}`)
   if (isDryRun) console.log('\n[DRY RUN] No rows written.')
