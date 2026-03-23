@@ -79,6 +79,8 @@ export function CaseSettings({
   const [status, setStatus] = useState(caseData.status)
   const [caseType, setCaseType] = useState(caseData.case_type)
   const [notes, setNotes] = useState(caseData.notes ?? '')
+  const [resolutionType, setResolutionType] = useState<string>((caseData as Record<string, unknown>).resolution_type as string ?? '')
+  const [resolutionNotes, setResolutionNotes] = useState<string>((caseData as Record<string, unknown>).resolution_notes as string ?? '')
 
   // Legal hold
   const [legalHold, setLegalHold] = useState(caseData.legal_hold ?? false)
@@ -109,7 +111,16 @@ export function CaseSettings({
     mutationFn: async () => {
       const { error } = await supabase
         .from('cases')
-        .update({ title, jurisdiction: jurisdiction || null, status, case_type: caseType, notes: notes || null })
+        .update({
+          title,
+          jurisdiction: jurisdiction || null,
+          status,
+          case_type: caseType,
+          notes: notes || null,
+          resolution_type: resolutionType || null,
+          resolution_notes: resolutionNotes || null,
+          resolved_at: resolutionType && !(caseData as Record<string, unknown>).resolution_type ? new Date().toISOString() : undefined,
+        })
         .eq('id', caseId)
       if (error) throw error
 
@@ -226,6 +237,49 @@ export function CaseSettings({
               <Label>Internal notes</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} disabled={!canManage} className="min-h-[80px]" />
             </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-sm font-medium">Case resolution</Label>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Record how this case was ultimately resolved. This will be shown in cross-reference panels across all linked cases.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-slate-500">Resolution type</Label>
+                <Select
+                  value={resolutionType || '__none__'}
+                  onValueChange={(v) => setResolutionType(v === '__none__' ? '' : v)}
+                  disabled={!canManage}
+                >
+                  <SelectTrigger><SelectValue placeholder="Not yet resolved" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Not yet resolved</SelectItem>
+                    <SelectItem value="found_alive">Found alive</SelectItem>
+                    <SelectItem value="remains_identified">Remains identified</SelectItem>
+                    <SelectItem value="perpetrator_convicted">Perpetrator convicted</SelectItem>
+                    <SelectItem value="perpetrator_identified">Perpetrator identified (no conviction)</SelectItem>
+                    <SelectItem value="closed_unresolved">Closed — unresolved</SelectItem>
+                    <SelectItem value="duplicate_case">Duplicate case</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {resolutionType && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-500">Resolution notes</Label>
+                  <Textarea
+                    value={resolutionNotes}
+                    onChange={(e) => setResolutionNotes(e.target.value)}
+                    disabled={!canManage}
+                    placeholder="Optional — e.g. remains identified via DNA, perpetrator convicted 1995…"
+                    className="min-h-[60px] text-sm"
+                  />
+                </div>
+              )}
+            </div>
+
             {canManage && (
               <Button onClick={() => saveGeneralMutation.mutate()} disabled={saveGeneralMutation.isPending}>
                 {saveGeneralMutation.isPending ? 'Saving...' : 'Save changes'}

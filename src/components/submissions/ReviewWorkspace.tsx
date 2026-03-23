@@ -47,6 +47,7 @@ import {
   detectPhonesInText,
 } from '@/lib/scoring'
 import type { Submission, ConfidenceLevel, ClaimType, DatePrecision, NoveltyFlag } from '@/lib/types'
+import { SubmissionLinksPanel } from './SubmissionLinksPanel'
 
 interface ReviewWorkspaceProps {
   submission: Submission & {
@@ -555,7 +556,7 @@ export function ReviewWorkspace({
   const hasDuplicate = (submission.duplicate_similarity ?? 0) > 0.75
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col lg:h-full">
       {/* Zone 1: Context bar */}
       <div className="flex-shrink-0 flex items-center justify-between gap-4 px-4 py-2 bg-white border-b border-slate-200 text-xs">
         <div className="flex items-center gap-3 flex-wrap">
@@ -615,10 +616,10 @@ export function ReviewWorkspace({
       )}
 
       {/* Main two-panel layout */}
-      <div className="flex flex-1 overflow-hidden min-h-0">
+      <div className="flex flex-col lg:flex-row flex-1 overflow-auto lg:overflow-hidden min-h-0">
 
         {/* Zone 2: Left panel — original submission */}
-        <div className="w-2/5 flex flex-col border-r border-slate-200 min-h-0">
+        <div className="w-full lg:w-2/5 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-200 lg:min-h-0 lg:overflow-hidden">
           <div className="flex-shrink-0 px-4 py-3 border-b border-slate-100 bg-slate-50">
             <h3 className="font-semibold text-slate-800 text-sm">Original submission — read only</h3>
             <p className="text-xs text-slate-400 mt-0.5">Click any sentence to extract as a claim</p>
@@ -778,10 +779,15 @@ export function ReviewWorkspace({
               )}
             </div>
           </ScrollArea>
+
+          {/* Cross-references: offender overlaps + DOE remains matches */}
+          <div className="flex-shrink-0 border-t border-slate-200 overflow-y-auto max-h-96 lg:max-h-72">
+            <SubmissionLinksPanel submissionId={submission.id} caseId={caseId} />
+          </div>
         </div>
 
         {/* Zone 3: Right panel — claim extraction workspace */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col lg:min-h-0 lg:overflow-hidden">
           <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-white">
             <h3 className="font-semibold text-slate-800 text-sm">
               Claim extraction workspace
