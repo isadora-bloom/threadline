@@ -41,7 +41,11 @@ const RESOLUTION_KEYWORDS = [
   'pleaded guilty', 'pled guilty', 'charged with murder', 'charged with',
   'remains were identified', 'body was identified', 'dna confirmed',
   'case was solved', 'killer was', 'murderer was', 'perpetrator was',
-  'arrested for', 'found guilty',
+  'arrested for', 'found guilty', 'arrest of', 'was arrested',
+  'indicted', 'indicted for', 'murder of', 'case was closed',
+  'has been charged', 'has been arrested', 'was charged',
+  'admitted to', 'admitted killing', 'pled no contest',
+  'announced the arrest', 'taken into custody', 'in custody for',
 ]
 
 // ── Types ─────────────────────────────────────────────────────────────────────
