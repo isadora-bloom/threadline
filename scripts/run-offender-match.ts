@@ -65,7 +65,23 @@ function extractStateAbbr(text: string): string | null {
 }
 
 function extractYear(text: string): number | null {
-  const m = text.match(/\b(19[5-9]\d|20[012]\d)\b/)
+  // Try specific incident date fields first — avoids grabbing birth year
+  const INCIDENT_FIELDS = [
+    'Date Missing', 'Date Last Seen', 'Last Seen', 'Date Disappeared',
+    'Missing Since', 'Date Found', 'Date Recovered', 'Date of Discovery',
+    'Date of Report',
+  ]
+  for (const field of INCIDENT_FIELDS) {
+    const re = new RegExp(`\\b${field.replace(/\s/g, '\\s+')}:\\s*([^|\\n]+)`, 'i')
+    const m = text.match(re)
+    if (m) {
+      const y = m[1].match(/\b(19[5-9]\d|20[012]\d)\b/)
+      if (y) return parseInt(y[1])
+    }
+  }
+  // Fallback — strip birth-year context so DOB doesn't masquerade as incident year
+  const stripped = text.replace(/\b(?:Date of Birth|Date Born|Birthday|Born|D\.?O\.?B\.?)\s*:?\s*[^|\n]*/gi, '')
+  const m = stripped.match(/\b(19[5-9]\d|20[012]\d)\b/)
   return m ? parseInt(m[1]) : null
 }
 
