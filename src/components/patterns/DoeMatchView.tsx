@@ -465,6 +465,9 @@ function MatchCard({ match, onReview }: {
                 <SignalBar label="Jewelry"     signal={match.signals.jewelry}                                 icon={Fingerprint} />
                 <SignalBar label="State"       signal={match.signals.location}                                icon={MapPin} />
                 <SignalBar label="Childbirth"  signal={match.signals.childbirth as typeof match.signals.sex}  icon={Users} />
+                {match.signals.time_gap && (
+                  <SignalBar label="Time gap"  signal={match.signals.time_gap as typeof match.signals.sex}    icon={Clock} />
+                )}
               </div>
             </div>
 

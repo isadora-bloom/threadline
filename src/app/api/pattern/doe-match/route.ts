@@ -87,6 +87,7 @@ interface MatchSignals {
   jewelry:       SignalResult & { keywords?: string[] }
   location:      SignalResult
   childbirth:    SignalResult
+  time_gap?:     SignalResult
   body_state?:   { state: BodyState; note: string | null; weight_applied: boolean }
 }
 
@@ -472,7 +473,7 @@ const DECOMP_NOTES: Record<BodyState, string | null> = {
   unknown:  null,
 }
 
-const MAX_SIGNAL_SCORES = { sex: 15, race: 12, age: 15, hair: 8, eyes: 8, height: 8, weight: 5, tattoo: 15, body_marks: 8, jewelry: 10, location: 15, childbirth: 8 }
+const MAX_SIGNAL_SCORES = { sex: 15, race: 12, age: 15, hair: 8, eyes: 8, height: 8, weight: 5, tattoo: 15, body_marks: 8, jewelry: 10, location: 15, childbirth: 8, time_gap: 10 }
 const MAX_POSSIBLE_BASE = Object.values(MAX_SIGNAL_SCORES).reduce((a, b) => a + b, 0)
 
 // ─── Scorers ──────────────────────────────────────────────────────────────────
@@ -922,6 +923,30 @@ function scoreChildbirth(a: ParsedCase, b: ParsedCase): SignalResult {
   return { score: -20, match: 'mismatch', detail: 'one parous, one nulliparous — strong negative' }
 }
 
+// ─── Time gap between disappearance and body found ────────────────────────────
+// Shorter recovery window = stronger match signal. Physical preservation is higher,
+// temporal plausibility is tighter. Hard guard: gap < 0 is structurally impossible
+// and should never reach this function (eliminated upstream), but we return 0 safely.
+
+function scoreTimeGap(missing: ParsedCase, unidentified: ParsedCase): SignalResult {
+  if (!missing.year || !unidentified.year) return { score: 0, match: 'unknown' }
+  // Structural guard — should already be hard-eliminated upstream
+  if (unidentified.year < missing.year) return { score: 0, match: 'n/a' }
+  const gapYears = Math.max(0,
+    (unidentified.year - missing.year) +
+    ((unidentified.month ?? 6) - (missing.month ?? 6)) / 12
+  )
+  const detail = gapYears < 2
+    ? `${Math.round(gapYears * 12)}mo gap`
+    : `${Math.round(gapYears)}yr gap`
+  if (gapYears < 2)  return { score: 10, match: 'very_short',  detail }
+  if (gapYears < 5)  return { score: 7,  match: 'short',       detail }
+  if (gapYears < 10) return { score: 4,  match: 'moderate',    detail }
+  if (gapYears < 15) return { score: 1,  match: 'long',        detail }
+  if (gapYears < 20) return { score: -2, match: 'very_long',   detail }
+  return               { score: -5, match: 'extended',          detail }
+}
+
 // ─── Composite score with decomposition adjustment ────────────────────────────
 
 function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
@@ -971,6 +996,7 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
     jewelry:    scoreJewelry(missing, unidentified),
     location:   scoreLocation(missing, unidentified),
     childbirth: scoreChildbirth(missing, unidentified),
+    time_gap:   scoreTimeGap(missing, unidentified),
   }
 
   // Apply body state decomposition weighting
@@ -1576,7 +1602,10 @@ export async function POST(req: NextRequest) {
         if (sexA && sexB && sexA !== sexB) { eliminated++; continue }
 
         // Hard eliminate temporal impossibility — remains found before person went missing
-        if (unident.year && missing.year && unident.year < missing.year) { eliminated++; continue }
+        if (unident.year && missing.year && (
+          unident.year < missing.year ||
+          (unident.year === missing.year && missing.month && unident.month && unident.month < missing.month)
+        )) { eliminated++; continue }
 
         // Hard eliminate race mismatch
         const raceA = normRace(missing.race), raceB = normRace(unident.race)
@@ -1603,6 +1632,7 @@ export async function POST(req: NextRequest) {
           jewelry:    scoreJewelry(missing, unident),
           location:   scoreLocation(destProxy, unident),   // <-- destination proxy
           childbirth: scoreChildbirth(missing, unident),
+          time_gap:   scoreTimeGap(missing, unident),
         }
 
         // Apply body state decomposition weighting
