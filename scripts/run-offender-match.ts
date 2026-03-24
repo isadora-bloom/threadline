@@ -70,9 +70,17 @@ function extractYear(text: string): number | null {
 }
 
 function extractSex(text: string): string | null {
+  // Check structured "Sex:" field first — DOE network format
+  const fieldMatch = text.match(/^Sex:\s*(Male|Female|M\b|F\b)/mi)
+  if (fieldMatch) {
+    const v = fieldMatch[1].toLowerCase()
+    if (v.startsWith('f')) return 'female'
+    if (v.startsWith('m')) return 'male'
+  }
+  // Fallback — avoid he/she/him/her; too easily triggered by incidental text
   const t = text.toLowerCase()
-  if (/\bfemale\b|\bwoman\b|\bgirl\b|\bshe\b|\bher\b/.test(t)) return 'female'
-  if (/\bmale\b|\bman\b|\bboy\b|\bhe\b|\bhim\b/.test(t)) return 'male'
+  if (/\bfemale\b|\bwoman\b|\bgirl\b/.test(t)) return 'female'
+  if (/\bmale\b|\bman\b|\bboy\b/.test(t)) return 'male'
   return null
 }
 
@@ -161,6 +169,8 @@ function scoreSubmission(
     if (off.birth_year && sub.year < off.birth_year + 14) return null
     // Victim disappeared after confirmed incarceration
     if (off.incarcerated_from && sub.year > off.incarcerated_from + 1) return null
+    // Victim disappeared well after known active period ended (no incarceration date)
+    if (off.active_to && !off.incarcerated_from && sub.year > off.active_to + 5) return null
 
     if (off.active_from && off.active_to) {
       if (sub.year >= off.active_from && sub.year <= off.active_to) {
