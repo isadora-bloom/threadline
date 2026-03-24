@@ -5,7 +5,7 @@
  * Stores results in offender_case_overlaps where composite >= MIN_SCORE.
  *
  * Scoring (100 pts total):
- *   Temporal          20  — active period + birth-year floor (hard eliminate if after incarceration)
+ *   Temporal          20  — active period match (graded decay outside window, -8 if well outside; 5 if year unknown)
  *   Predator geo      25  — submission state in offender home/travel/operation states
  *   Victim geo        20  — submission state in offender's known victim states
  *   Sex               15  — victim sex match
@@ -163,19 +163,27 @@ function scoreSubmission(
     if (off.incarcerated_from && sub.year > off.incarcerated_from + 1) return null
 
     if (off.active_from && off.active_to) {
-      const buffer = 3 // allow 3-year window either side
-      if (sub.year >= off.active_from - buffer && sub.year <= off.active_to + buffer) {
-        temporal = sub.year >= off.active_from && sub.year <= off.active_to ? 15 : 8
+      if (sub.year >= off.active_from && sub.year <= off.active_to) {
+        temporal = 20                                              // exact active window — full score
       } else {
-        temporal = 0
+        const gap = sub.year < off.active_from
+          ? off.active_from - sub.year
+          : sub.year - off.active_to
+        if (gap <= 2)      temporal = 14  // just outside window
+        else if (gap <= 5) temporal = 7   // short gap
+        else if (gap <= 10) temporal = 2  // long gap
+        else               temporal = -8  // well outside known active period — strong penalty
       }
     } else if (off.active_from) {
-      temporal = sub.year >= off.active_from ? 12 : 4
+      // Only start year known
+      if (sub.year >= off.active_from)          temporal = 14   // after known start
+      else if (sub.year >= off.active_from - 3) temporal = 8    // just before start
+      else                                       temporal = 2    // well before known start
     } else {
-      temporal = 8
+      temporal = 8  // no date info on offender — partial credit
     }
   } else {
-    temporal = 8 // unknown year — partial credit
+    temporal = 5  // unknown disappearance year — small partial credit only
   }
 
   // ── Geographic scores ─────────────────────────────────────────────────────
