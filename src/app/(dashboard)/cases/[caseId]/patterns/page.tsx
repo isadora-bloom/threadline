@@ -15,8 +15,13 @@ import { CaseLinkageView } from '@/components/patterns/CaseLinkageView'
 import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads'
 import { ResearchTaskList } from '@/components/research/ResearchTaskList'
 import { DoeMatchView } from '@/components/patterns/DoeMatchView'
-import { GeoView } from '@/components/patterns/GeoView'
+import dynamic from 'next/dynamic'
 import { OffenderView } from '@/components/patterns/OffenderView'
+
+const GeoView = dynamic(
+  () => import('@/components/patterns/GeoView').then(m => ({ default: m.GeoView })),
+  { ssr: false, loading: () => <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Loading map…</div> }
+)
 import { useToast } from '@/components/ui/use-toast'
 import { useParams } from 'next/navigation'
 import {

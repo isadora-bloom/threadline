@@ -1,5 +1,6 @@
 'use client'
 
+import 'leaflet/dist/leaflet.css'
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
@@ -130,11 +131,6 @@ export function GeoView({ caseId }: GeoViewProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const leafletMapRef = useRef<import('leaflet').Map | null>(null)
   const markersRef = useRef<import('leaflet').CircleMarker[]>([])
-
-  // Load leaflet CSS
-  useEffect(() => {
-    import('leaflet/dist/leaflet.css')
-  }, [])
 
   // Find the Doe Network missing persons case ID
   const { data: missingCaseId } = useQuery({
