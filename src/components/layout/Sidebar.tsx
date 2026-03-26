@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useParams, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Briefcase, LogOut } from 'lucide-react'
+import { Briefcase, LogOut, Radar, Users, Search, Flame, BookOpen } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -97,15 +97,31 @@ export function Sidebar() {
     router.push('/login')
   }
 
+  // Intelligence queue count
+  const { data: queueCount } = useQuery({
+    queryKey: ['intelligence-queue-count'],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('intelligence_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'new')
+      return count ?? 0
+    },
+  })
+
   const mainLinks = [
+    { href: '/intelligence', label: 'Intelligence', icon: Radar, badge: queueCount },
+    { href: '/registry', label: 'Registry', icon: Search },
+    { href: '/needing-attention', label: 'Cases That Need You', icon: Flame },
     { href: '/cases', label: 'My Cases', icon: Briefcase },
+    { href: '/research', label: 'Research', icon: BookOpen },
   ]
 
   return (
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-slate-200">
-        <Link href="/cases" className="flex items-center gap-2">
+        <Link href="/intelligence" className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded bg-indigo-600">
             <span className="text-xs font-bold text-white">TL</span>
           </div>
@@ -122,7 +138,7 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto px-3 py-4">
         <nav className="space-y-0.5">
           {mainLinks.map((link) => {
-            const isActive = pathname.startsWith(link.href) && !caseId
+            const isActive = pathname === link.href || (pathname.startsWith(link.href + '/') && link.href !== '/')
             const Icon = link.icon
             return (
               <Link
@@ -136,7 +152,12 @@ export function Sidebar() {
                 )}
               >
                 <Icon className="h-4 w-4 flex-shrink-0" />
-                {link.label}
+                <span className="flex-1">{link.label}</span>
+                {link.badge ? (
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-700">
+                    {link.badge > 99 ? '99+' : link.badge}
+                  </span>
+                ) : null}
               </Link>
             )
           })}

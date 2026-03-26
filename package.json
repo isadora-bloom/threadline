@@ -9,8 +9,17 @@
     "lint": "next lint",
     "seed": "node scripts/seed.mjs",
     "scrape:doe": "npx tsx scripts/scrape-doe-network.ts",
+    "scrape:doe-network": "npx tsx scripts/scrape-doe-network.ts",
     "import:doe": "npx tsx scripts/import-doe-network.ts",
-    "seed:goochland": "npx tsx scripts/seed-goochland-boy.ts"
+    "seed:goochland": "npx tsx scripts/seed-goochland-boy.ts",
+    "scrape:namus": "npx tsx scripts/scrape-namus.ts",
+    "ai:batch": "npx tsx scripts/ai-batch-process.ts",
+    "ai:connections": "npx tsx scripts/compute-global-connections.ts",
+    "ai:queue": "npx tsx scripts/populate-intelligence-queue.ts",
+    "pipeline:match": "npx tsx scripts/rule-based-match.ts",
+    "pipeline:extract": "npx tsx scripts/ai-targeted-extract.ts",
+    "pipeline:patterns": "npx tsx scripts/ai-pattern-analysis.ts",
+    "pipeline:all": "npx tsx scripts/rule-based-match.ts && npx tsx scripts/ai-targeted-extract.ts && npx tsx scripts/ai-pattern-analysis.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
