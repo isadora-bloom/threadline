@@ -31,11 +31,36 @@ import {
 
 interface AiAssessment {
   connection_level?: number
+  solvability_score?: number
   summary: string
+  solvability_note?: string
   supporting: string[]
   conflicting: string[]
   reviewed_at: string
   model: string
+}
+
+const SOLVABILITY_LABEL: Record<number, string> = {
+  1: 'No path', 2: 'Remote', 3: 'Possible', 4: 'Probable', 5: 'Actionable',
+}
+const SOLVABILITY_COLOR: Record<number, string> = {
+  1: 'bg-slate-100 text-slate-500 border-slate-200',
+  2: 'bg-red-50 text-red-500 border-red-200',
+  3: 'bg-amber-50 text-amber-600 border-amber-200',
+  4: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  5: 'bg-teal-50 text-teal-700 border-teal-200',
+}
+
+function SolvabilityBadge({ score }: { score: number }) {
+  const cls = SOLVABILITY_COLOR[score] ?? SOLVABILITY_COLOR[2]
+  const label = SOLVABILITY_LABEL[score] ?? `${score}`
+  return (
+    <span className={`inline-flex items-center gap-1 border rounded-full text-[10px] px-2 py-0.5 font-semibold ${cls}`}>
+      <span className="opacity-60 text-[8px] uppercase tracking-wide">solvability</span>
+      <span className="font-black">{score}</span>
+      <span className="opacity-80">{label}</span>
+    </span>
+  )
 }
 
 const CONNECTION_LEVEL_LABEL: Record<number, string> = {
@@ -161,7 +186,7 @@ function OffenderCases({ offenderId, caseId, minScore }: {
   caseId: string
   minScore: number
 }) {
-  const [aiFilter, setAiFilter] = useState<'all' | 'strong_plus' | 'some' | 'ignore' | 'worth_investigating'>('all')
+  const [aiFilter, setAiFilter] = useState<'all' | 'strong_plus' | 'some' | 'ignore' | 'worth_investigating' | 'solvable'>('all')
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   // Local overrides for optimistic AI + status updates (keyed by submission_id)
   const [localOverrides, setLocalOverrides] = useState<Map<string, Partial<OffenderOverlap>>>(new Map())
@@ -228,10 +253,12 @@ function OffenderCases({ offenderId, caseId, minScore }: {
   // Apply AI connection level filter
   const filtered = overlaps.filter(o => {
     const lvl = o.ai_assessment?.connection_level ?? null
-    if (aiFilter === 'strong_plus')       return lvl !== null && lvl >= 4
-    if (aiFilter === 'some')              return lvl === 3
-    if (aiFilter === 'ignore')            return lvl !== null && lvl <= 2
+    const sol = o.ai_assessment?.solvability_score ?? null
+    if (aiFilter === 'strong_plus')         return lvl !== null && lvl >= 4
+    if (aiFilter === 'some')                return lvl === 3
+    if (aiFilter === 'ignore')              return lvl !== null && lvl <= 2
     if (aiFilter === 'worth_investigating') return o.reviewer_status === 'worth_investigating'
+    if (aiFilter === 'solvable')            return sol !== null && sol >= 3
     return true
   })
 
@@ -250,6 +277,7 @@ function OffenderCases({ offenderId, caseId, minScore }: {
           { value: 'strong_plus',         label: '4–5 Strong+',         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',  active: 'bg-emerald-700 text-white border-emerald-700' },
           { value: 'some',                label: '3 Some',              cls: 'bg-amber-50 text-amber-700 border-amber-200',        active: 'bg-amber-500 text-white border-amber-500' },
           { value: 'ignore',              label: '1–2 Ignore/Slim',     cls: 'bg-slate-100 text-slate-500 border-slate-200',       active: 'bg-slate-500 text-white border-slate-500' },
+          { value: 'solvable',            label: 'Solvable (3+)',        cls: 'bg-teal-50 text-teal-700 border-teal-200',           active: 'bg-teal-700 text-white border-teal-700' },
         ] as const).map(f => (
           <button key={f.value} onClick={() => setAiFilter(f.value)}
             className={`px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${aiFilter === f.value ? f.active : f.cls}`}>
@@ -329,12 +357,18 @@ function OffenderCases({ offenderId, caseId, minScore }: {
                   aiLevel <= 1 ? 'bg-slate-50 border-slate-200' :
                   'bg-amber-50 border-amber-200'
                 }`}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Sparkles className="h-3 w-3 text-slate-400 flex-shrink-0" />
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">AI assessment</span>
                     <ConnectionLevelBadge level={aiLevel} />
+                    {overlap.ai_assessment.solvability_score != null && (
+                      <SolvabilityBadge score={overlap.ai_assessment.solvability_score} />
+                    )}
                   </div>
                   <p className="text-slate-700 leading-relaxed">{overlap.ai_assessment.summary}</p>
+                  {overlap.ai_assessment.solvability_note && (
+                    <p className="text-[10px] text-slate-500 italic">{overlap.ai_assessment.solvability_note}</p>
+                  )}
                   {overlap.ai_assessment.supporting.length > 0 && (
                     <ul className="space-y-0.5 mt-1">
                       {overlap.ai_assessment.supporting.map((s, i) => (

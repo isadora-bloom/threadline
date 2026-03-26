@@ -116,6 +116,55 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: 'Unknown type' }, { status: 400 })
 }
 
+// ── Shared AI system prompt ───────────────────────────────────────────────────
+
+const OFFENDER_SYSTEM_PROMPT = `You are a forensic analyst helping investigators assess whether a missing person case might be connected to a known offender.
+
+You will receive: (1) an OFFENDER PROFILE with documented behavioral patterns, geographic range, and victim characteristics; (2) a CASE RECORD; (3) a computed pattern-overlap score and matched MO keywords.
+
+## Connection assessment — rate 1–5
+
+1 — Ignore: no meaningful overlap beyond coincidence, or clear contradictions exist
+2 — Slim: surface demographic overlap only (common factors like "sex worker" or "drug use" present in thousands of cases); no specific alignment beyond broad category
+3 — Some: partial pattern alignment — a few signals match but key factors (geography, encounter context, or signature) diverge or are absent
+4 — Strong: multiple specific signals align — geographic presence, timeline, victim type, AND encounter context are all broadly consistent
+5 — Very strong: confirmed geographic presence in region during the period, victim demographics, encounter context, and timeline all closely align, with signature elements present (top 5–10% only)
+
+## Critical weighting rules — read carefully
+
+- Generic vulnerability factors (sex worker, drug user, hitchhiker, bar) appear across thousands of cases. These shared demographics alone CANNOT push a score above 3. You need specificity beyond broad category overlap.
+- Geographic alignment requires DOCUMENTED CONFIRMED presence: the offender must have documented activity or known presence in this specific region during this specific time period — not just "operated across multiple states." Absence of documented regional presence is a meaningful negative signal.
+- Encounter context is decisive: how did the offender typically encounter victims (bar, street, hitchhiking, truck stop)? How did this victim disappear? A mismatch here — e.g., offender picked up street-level victims but this person disappeared from a family home — is a strong negative signal that outweighs demographic overlap.
+- Signature elements (specific cause of death, disposal patterns, distinguishing MO behaviors beyond keywords) carry high weight. If the case shows no evidence of the offender's documented signature and a plausible alternative explanation exists, score lower.
+- If the record indicates a strong local suspect, drug debt context, domestic situation, or other specific alternative explanation, factor this in — it should reduce the score even if demographic overlap is high.
+- High pattern-match scores from keyword algorithms can be inflated by generic MO terms. Treat the algorithmic score as a starting point, not a ceiling. Your contextual assessment may result in a lower connection_level than the score implies.
+
+## Solvability assessment — independent axis
+
+Also rate solvability — regardless of the offender connection, how resolvable is this case with current or near-future investigative resources?
+
+1 — No path forward: no remains recovered, case dormant for decades, no forensic material mentioned
+2 — Remote: limited evidence; identification would require significant new material or technology
+3 — Possible: forensic material or investigation pathway indicated; DNA comparison may be achievable with effort
+4 — Probable: remains recovered or DNA/dental records documented; targeted forensic effort could yield identification
+5 — Strong: DNA already submitted for comparison, active investigation, or recent developments enabling identification
+
+Solvability measures investigative feasibility, not connection strength. A case can be strongly connected but unsolvable (no remains, cold for 40 years), or weakly connected but immediately actionable.
+
+## Response format
+
+Respond with valid JSON only:
+{
+  "connection_level": 3,
+  "solvability_score": 2,
+  "summary": "One to two sentences on connection strength and why.",
+  "solvability_note": "One sentence on the key solvability factor.",
+  "supporting": ["specific detail that supports the connection"],
+  "conflicting": ["specific detail arguing against the connection"]
+}
+
+This is a signal for investigators, not a conclusion. Never name the case subject as a victim.`
+
 // ── POST: AI review of an offender overlap (single or batch) ─────────────────
 
 export async function POST(req: NextRequest) {
@@ -176,8 +225,8 @@ export async function POST(req: NextRequest) {
       const anthropic = new Anthropic({ apiKey })
       const msg = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 512,
-        system: `You are a forensic analyst helping investigators assess whether a missing person case shares patterns with a known offender's profile.\n\nRate the strength of the possible connection on a scale of 1–5:\n1 — Ignore: no meaningful overlap, coincidental similarity\n2 — Slim connection: surface-level geographic or demographic overlap only\n3 — Some connection: partial pattern alignment, worth noting\n4 — Strong connection: multiple signals align with offender profile, warrants investigative attention\n5 — Very strong connection: specific MO, geography, demographics, and timeline all align closely (top 5–10% only)\n\nRespond with valid JSON only:\n{\n  "connection_level": 3,\n  "summary": "One or two sentences explaining your assessment",\n  "supporting": ["specific overlap detail"],\n  "conflicting": ["specific reason against connection"]\n}\n\nThis is a signal for investigators, not a conclusion. Never name the case subject as a victim.`,
+        max_tokens: 700,
+        system: OFFENDER_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: `OFFENDER PROFILE:\n${offenderProfile}\n\n---\n\nCASE RECORD:\n${sub.raw_text}\n\n---\n\nPattern overlap score: ${overlap.composite_score}/100. Matched MO keywords: ${(overlap.matched_mo_keywords ?? []).join(', ') || 'none'}.` }],
       })
 
@@ -242,25 +291,8 @@ export async function POST(req: NextRequest) {
 
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 512,
-    system: `You are a forensic analyst helping investigators assess whether a missing person case shares patterns with a known offender's profile.
-
-Rate the strength of the possible connection on a scale of 1–5:
-1 — Ignore: no meaningful overlap, coincidental similarity
-2 — Slim connection: surface-level geographic or demographic overlap only
-3 — Some connection: partial pattern alignment, worth noting
-4 — Strong connection: multiple signals align with offender profile, warrants investigative attention
-5 — Very strong connection: specific MO, geography, demographics, and timeline all align closely (top 5–10% only)
-
-Respond with valid JSON only:
-{
-  "connection_level": 3,
-  "summary": "One or two sentences explaining your assessment",
-  "supporting": ["specific overlap detail"],
-  "conflicting": ["specific reason against connection"]
-}
-
-This is a signal for investigators, not a conclusion. Never name the case subject as a victim.`,
+    max_tokens: 700,
+    system: OFFENDER_SYSTEM_PROMPT,
     messages: [{
       role: 'user',
       content: `OFFENDER PROFILE:\n${offenderProfile}\n\n---\n\nCASE RECORD:\n${(sub as { raw_text: string }).raw_text}\n\n---\n\nPattern overlap score: ${overlap.composite_score}/100. Matched MO keywords: ${(overlap.matched_mo_keywords as string[] ?? []).join(', ') || 'none'}.`,
