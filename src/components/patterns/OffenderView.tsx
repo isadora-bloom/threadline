@@ -19,7 +19,62 @@ import {
   ShieldAlert,
   ArrowRight,
   CheckCircle2,
+  Sparkles,
+  Clock,
+  XCircle,
+  CheckCircle,
+  Brain,
+  RefreshCw,
 } from 'lucide-react'
+
+// ── AI connection level helpers ───────────────────────────────────────────────
+
+interface AiAssessment {
+  connection_level?: number
+  summary: string
+  supporting: string[]
+  conflicting: string[]
+  reviewed_at: string
+  model: string
+}
+
+const CONNECTION_LEVEL_LABEL: Record<number, string> = {
+  1: 'Ignore', 2: 'Slim', 3: 'Some connection', 4: 'Strong', 5: 'Very strong',
+}
+const CONNECTION_LEVEL_COLOR: Record<number, string> = {
+  1: 'bg-slate-100 text-slate-500 border-slate-200',
+  2: 'bg-blue-50 text-blue-600 border-blue-200',
+  3: 'bg-amber-50 text-amber-700 border-amber-200',
+  4: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  5: 'bg-rose-100 text-rose-700 border-rose-300',
+}
+const CONNECTION_LEVEL_ROW: Record<number, string> = {
+  1: 'opacity-50',
+  2: '',
+  3: '',
+  4: 'border-l-2 border-l-emerald-300 bg-emerald-50/20',
+  5: 'border-l-2 border-l-rose-300 bg-rose-50/30',
+}
+
+function ConnectionLevelBadge({ level }: { level: number }) {
+  const cls = CONNECTION_LEVEL_COLOR[level] ?? CONNECTION_LEVEL_COLOR[2]
+  const label = CONNECTION_LEVEL_LABEL[level] ?? `Level ${level}`
+  return (
+    <span className={`inline-flex items-center gap-1 border rounded-full text-[10px] px-2 py-0.5 font-semibold ${cls}`}>
+      <span className="font-black">{level}</span>
+      <span className="opacity-80">{label}</span>
+    </span>
+  )
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  unreviewed:          'bg-slate-100 text-slate-600',
+  worth_investigating: 'bg-amber-100 text-amber-700',
+  confirmed:           'bg-green-100 text-green-700',
+  dismissed:           'bg-red-50 text-red-500',
+}
+
+// ── Interfaces ────────────────────────────────────────────────────────────────
 
 interface Offender {
   id: string
@@ -61,6 +116,8 @@ interface OffenderOverlap {
   mo_score: number
   matched_mo_keywords: string[]
   resolution_confirmed: boolean
+  reviewer_status: string
+  ai_assessment: AiAssessment | null
   preview: string
 }
 
@@ -90,31 +147,74 @@ function ScoreBar({ label, score, max }: { label: string; score: number; max: nu
     <div className="flex items-center gap-2">
       <span className="text-xs text-slate-500 w-24 flex-shrink-0">{label}</span>
       <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-indigo-400 rounded-full"
-          style={{ width: `${pct}%` }}
-        />
+        <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs font-medium text-slate-700 w-6 text-right">{score}</span>
     </div>
   )
 }
 
-function OffenderCases({ offenderId, caseId, minScore }: { offenderId: string; caseId: string; minScore: number }) {
+// ── OffenderCases — overlap rows for a single offender ────────────────────────
+
+function OffenderCases({ offenderId, caseId, minScore }: {
+  offenderId: string
+  caseId: string
+  minScore: number
+}) {
+  const [aiFilter, setAiFilter] = useState<'all' | 'strong_plus' | 'some' | 'ignore' | 'worth_investigating'>('all')
+  const [reviewingId, setReviewingId] = useState<string | null>(null)
+  // Local overrides for optimistic AI + status updates (keyed by submission_id)
+  const [localOverrides, setLocalOverrides] = useState<Map<string, Partial<OffenderOverlap>>>(new Map())
+
   const { data, isLoading } = useQuery({
     queryKey: ['offender-cases', offenderId, caseId, minScore],
     queryFn: async () => {
-      const res = await fetch(`/api/pattern/offenders?type=offender_cases&offenderId=${offenderId}&caseId=${caseId}&minScore=${minScore}&limit=30`)
+      const res = await fetch(
+        `/api/pattern/offenders?type=offender_cases&offenderId=${offenderId}&caseId=${caseId}&minScore=${minScore}&limit=30`
+      )
       if (!res.ok) throw new Error('Failed to load')
       const json = await res.json()
       return json.overlaps as OffenderOverlap[]
     },
   })
 
+  async function runAiReview(submissionId: string) {
+    setReviewingId(submissionId)
+    try {
+      const res = await fetch('/api/pattern/offenders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offenderId, submissionId }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json() as { ok: boolean; assessment: AiAssessment }
+      setLocalOverrides(prev => {
+        const next = new Map(prev)
+        next.set(submissionId, { ...next.get(submissionId), ai_assessment: json.assessment })
+        return next
+      })
+    } finally {
+      setReviewingId(null)
+    }
+  }
+
+  async function updateStatus(submissionId: string, reviewerStatus: string) {
+    setLocalOverrides(prev => {
+      const next = new Map(prev)
+      next.set(submissionId, { ...next.get(submissionId), reviewer_status: reviewerStatus })
+      return next
+    })
+    await fetch('/api/pattern/offenders', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offenderId, submissionId, reviewerStatus }),
+    })
+  }
+
   if (isLoading) return (
     <div className="flex items-center gap-2 p-4 text-slate-500 text-sm">
       <Loader2 className="h-4 w-4 animate-spin" />
-      Loading overlapping submissions...
+      Loading overlapping submissions…
     </div>
   )
 
@@ -122,56 +222,206 @@ function OffenderCases({ offenderId, caseId, minScore }: { offenderId: string; c
     <p className="p-4 text-sm text-slate-500">No submissions in this case meet the overlap threshold.</p>
   )
 
+  // Merge server data with local overrides
+  const overlaps = data.map(o => ({ ...o, ...(localOverrides.get(o.submission_id) ?? {}) }))
+
+  // Apply AI connection level filter
+  const filtered = overlaps.filter(o => {
+    const lvl = o.ai_assessment?.connection_level ?? null
+    if (aiFilter === 'strong_plus')       return lvl !== null && lvl >= 4
+    if (aiFilter === 'some')              return lvl === 3
+    if (aiFilter === 'ignore')            return lvl !== null && lvl <= 2
+    if (aiFilter === 'worth_investigating') return o.reviewer_status === 'worth_investigating'
+    return true
+  })
+
+  const hasAnyReview = overlaps.some(o => o.ai_assessment !== null)
+
   return (
-    <div className="divide-y divide-slate-100">
-      {data.map((overlap) => (
-        <div key={overlap.submission_id} className={`p-3 ${overlap.resolution_confirmed ? 'bg-green-50' : 'hover:bg-slate-50'}`}>
-          {overlap.resolution_confirmed && (
-            <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold text-green-700 uppercase tracking-wide">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Confirmed connection — conviction on record
-            </div>
-          )}
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">{overlap.preview || '(no preview)'}</p>
-              {overlap.matched_mo_keywords?.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  {overlap.matched_mo_keywords.map(kw => (
-                    <Badge key={kw} variant="outline" className="text-[10px] px-1.5 py-0 text-indigo-700 border-indigo-200 bg-indigo-50">
-                      {MO_LABELS[kw] ?? kw}
-                    </Badge>
-                  ))}
+    <div>
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100 flex-wrap">
+        <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+          <Sparkles className="h-2.5 w-2.5" />Filter:
+        </span>
+        {([
+          { value: 'all',                 label: 'All',                 cls: 'bg-white text-slate-600 border-slate-300',          active: 'bg-slate-800 text-white border-slate-800' },
+          { value: 'worth_investigating', label: 'Worth investigating',  cls: 'bg-amber-50 text-amber-700 border-amber-200',        active: 'bg-amber-600 text-white border-amber-600' },
+          { value: 'strong_plus',         label: '4–5 Strong+',         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',  active: 'bg-emerald-700 text-white border-emerald-700' },
+          { value: 'some',                label: '3 Some',              cls: 'bg-amber-50 text-amber-700 border-amber-200',        active: 'bg-amber-500 text-white border-amber-500' },
+          { value: 'ignore',              label: '1–2 Ignore/Slim',     cls: 'bg-slate-100 text-slate-500 border-slate-200',       active: 'bg-slate-500 text-white border-slate-500' },
+        ] as const).map(f => (
+          <button key={f.value} onClick={() => setAiFilter(f.value)}
+            className={`px-2 py-0.5 text-[10px] font-medium rounded border transition-colors ${aiFilter === f.value ? f.active : f.cls}`}>
+            {f.label}
+          </button>
+        ))}
+        {!hasAnyReview && (
+          <span className="text-[10px] text-slate-400 italic ml-1">— run AI review on rows below to enable filtering</span>
+        )}
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {filtered.map((overlap) => {
+          const aiLevel = overlap.ai_assessment?.connection_level ?? null
+          const rowCls = aiLevel ? (CONNECTION_LEVEL_ROW[aiLevel] ?? '') : ''
+          const isReviewing = reviewingId === overlap.submission_id
+          const status = overlap.reviewer_status ?? 'unreviewed'
+
+          return (
+            <div
+              key={overlap.submission_id}
+              className={`p-3 ${overlap.resolution_confirmed ? 'bg-green-50' : 'hover:bg-slate-50/50'} ${rowCls}`}
+            >
+              {overlap.resolution_confirmed && (
+                <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold text-green-700 uppercase tracking-wide">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Confirmed connection — conviction on record
                 </div>
               )}
-            </div>
-            <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
-              <div className="text-right">
-                <span className="text-base font-bold text-indigo-700">{Math.round(overlap.composite_score)}</span>
-                <span className="text-xs text-slate-400">/100</span>
+
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">{overlap.preview || '(no preview)'}</p>
+                  {overlap.matched_mo_keywords?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {overlap.matched_mo_keywords.map(kw => (
+                        <Badge key={kw} variant="outline" className="text-[10px] px-1.5 py-0 text-indigo-700 border-indigo-200 bg-indigo-50">
+                          {MO_LABELS[kw] ?? kw}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+                  <div className="text-right">
+                    <span className="text-base font-bold text-indigo-700">{Math.round(overlap.composite_score)}</span>
+                    <span className="text-xs text-slate-400">/100</span>
+                  </div>
+                  {aiLevel && <ConnectionLevelBadge level={aiLevel} />}
+                  <Badge className={`text-[10px] ${STATUS_STYLE[status]}`}>
+                    {status.replace(/_/g, ' ')}
+                  </Badge>
+                  <Link
+                    href={`/cases/${overlap.case_id}/submissions/${overlap.submission_id}`}
+                    className="flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    View submission <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
               </div>
-              <Link
-                href={`/cases/${overlap.case_id}/submissions/${overlap.submission_id}`}
-                className="flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 font-medium"
-              >
-                View submission <ArrowRight className="h-3 w-3" />
-              </Link>
+
+              {/* Score bars */}
+              <div className="mt-2 space-y-0.5">
+                <ScoreBar label="MO match"     score={overlap.mo_score}           max={22} />
+                <ScoreBar label="Predator geo" score={overlap.predator_geo_score}  max={20} />
+                <ScoreBar label="Sex"          score={overlap.victim_sex_score}    max={15} />
+                <ScoreBar label="Victim geo"   score={overlap.victim_geo_score}    max={15} />
+                <ScoreBar label="Temporal"     score={overlap.temporal_score}      max={15} />
+                <ScoreBar label="Age"          score={overlap.victim_age_score}    max={8} />
+                <ScoreBar label="Race"         score={overlap.victim_race_score}   max={5} />
+              </div>
+
+              {/* AI assessment panel */}
+              {overlap.ai_assessment && aiLevel && (
+                <div className={`mt-2 p-2.5 rounded border space-y-1 text-[11px] ${
+                  aiLevel >= 4 ? 'bg-emerald-50 border-emerald-200' :
+                  aiLevel <= 1 ? 'bg-slate-50 border-slate-200' :
+                  'bg-amber-50 border-amber-200'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">AI assessment</span>
+                    <ConnectionLevelBadge level={aiLevel} />
+                  </div>
+                  <p className="text-slate-700 leading-relaxed">{overlap.ai_assessment.summary}</p>
+                  {overlap.ai_assessment.supporting.length > 0 && (
+                    <ul className="space-y-0.5 mt-1">
+                      {overlap.ai_assessment.supporting.map((s, i) => (
+                        <li key={i} className="text-[10px] text-green-700 flex items-start gap-1">
+                          <CheckCircle className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />{s}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {overlap.ai_assessment.conflicting.length > 0 && (
+                    <ul className="space-y-0.5">
+                      {overlap.ai_assessment.conflicting.map((s, i) => (
+                        <li key={i} className="text-[10px] text-red-600 flex items-start gap-1">
+                          <XCircle className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />{s}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-[9px] text-slate-400">AI signal only — requires investigator review.</p>
+                </div>
+              )}
+
+              {/* Action row */}
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                {/* AI review */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-[10px] gap-1 border-violet-200 text-violet-600 hover:bg-violet-50"
+                  disabled={isReviewing}
+                  onClick={() => runAiReview(overlap.submission_id)}
+                >
+                  {isReviewing
+                    ? <><Loader2 className="h-2.5 w-2.5 animate-spin" />Reviewing…</>
+                    : <><Sparkles className="h-2.5 w-2.5" />{overlap.ai_assessment ? 'Re-review' : 'AI review'}</>
+                  }
+                </Button>
+
+                {/* Reviewer status actions */}
+                {status === 'unreviewed' && (
+                  <>
+                    <button
+                      onClick={() => updateStatus(overlap.submission_id, 'worth_investigating')}
+                      className="h-6 flex items-center gap-1 text-[10px] px-2 rounded border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors"
+                    >
+                      <Clock className="h-2.5 w-2.5" />Worth investigating
+                    </button>
+                    <button
+                      onClick={() => updateStatus(overlap.submission_id, 'dismissed')}
+                      className="h-6 flex items-center gap-1 text-[10px] px-2 rounded border border-slate-200 text-slate-400 hover:bg-slate-50 transition-colors"
+                    >
+                      <XCircle className="h-2.5 w-2.5" />Dismiss
+                    </button>
+                  </>
+                )}
+                {status === 'worth_investigating' && (
+                  <button
+                    onClick={() => updateStatus(overlap.submission_id, 'unreviewed')}
+                    className="h-6 flex items-center gap-1 text-[10px] px-2 rounded border border-slate-200 text-slate-400 hover:bg-slate-50 transition-colors"
+                  >
+                    <RefreshCw className="h-2.5 w-2.5" />Reset
+                  </button>
+                )}
+                {status === 'dismissed' && (
+                  <button
+                    onClick={() => updateStatus(overlap.submission_id, 'unreviewed')}
+                    className="h-6 flex items-center gap-1 text-[10px] px-2 rounded border border-slate-200 text-slate-400 hover:bg-slate-50 transition-colors"
+                  >
+                    <RefreshCw className="h-2.5 w-2.5" />Restore
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-2 space-y-0.5">
-            <ScoreBar label="MO match" score={overlap.mo_score} max={22} />
-            <ScoreBar label="Predator geo" score={overlap.predator_geo_score} max={20} />
-            <ScoreBar label="Sex" score={overlap.victim_sex_score} max={15} />
-            <ScoreBar label="Victim geo" score={overlap.victim_geo_score} max={15} />
-            <ScoreBar label="Temporal" score={overlap.temporal_score} max={15} />
-            <ScoreBar label="Age" score={overlap.victim_age_score} max={8} />
-            <ScoreBar label="Race" score={overlap.victim_race_score} max={5} />
-          </div>
-        </div>
-      ))}
+          )
+        })}
+
+        {filtered.length === 0 && (
+          <p className="p-4 text-sm text-slate-400 italic text-center">
+            No overlaps match this filter.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
+
+// ── OffenderCard ──────────────────────────────────────────────────────────────
 
 function OffenderCard({ offender, caseId, minScore }: { offender: Offender; caseId: string; minScore: number }) {
   const [expanded, setExpanded] = useState(false)
@@ -231,8 +481,7 @@ function OffenderCard({ offender, caseId, minScore }: { offender: Offender; case
             <div className="flex items-center gap-3 mt-1 flex-wrap">
               {activeYears && (
                 <span className="text-xs text-slate-500 flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  {activeYears}
+                  <Calendar className="h-3 w-3" />{activeYears}
                 </span>
               )}
               {allStates.length > 0 && (
@@ -330,9 +579,15 @@ function OffenderCard({ offender, caseId, minScore }: { offender: Offender; case
             {/* Matching submissions */}
             {offender.overlap_count > 0 && (
               <div className="border-t border-slate-100">
-                <p className="px-4 py-2 text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  Overlapping submissions ({offender.overlap_count} above threshold)
-                </p>
+                <div className="flex items-center justify-between px-4 py-2">
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                    Overlapping submissions ({offender.overlap_count} above threshold)
+                  </p>
+                  <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                    <Brain className="h-3 w-3" />
+                    <span>Click AI review on any row below to assess the connection</span>
+                  </div>
+                </div>
                 <OffenderCases offenderId={offender.id} caseId={caseId} minScore={minScore} />
               </div>
             )}
@@ -348,6 +603,8 @@ function OffenderCard({ offender, caseId, minScore }: { offender: Offender; case
     </Card>
   )
 }
+
+// ── OffenderView (main) ───────────────────────────────────────────────────────
 
 const SCORE_OPTIONS = [
   { label: '50+', value: 50 },
@@ -418,9 +675,7 @@ export function OffenderView({ caseId }: { caseId: string }) {
               key={k}
               onClick={() => setSortKey(k)}
               className={`text-xs px-2 py-1 rounded ${
-                sortKey === k
-                  ? 'bg-indigo-100 text-indigo-700 font-medium'
-                  : 'text-slate-500 hover:bg-slate-100'
+                sortKey === k ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-slate-500 hover:bg-slate-100'
               }`}
             >
               {k === 'overlap_count' ? 'Overlaps' : k === 'suspected_count' ? 'Suspected' : k === 'conviction_count' ? 'Convicted' : 'Name'}
@@ -435,9 +690,7 @@ export function OffenderView({ caseId }: { caseId: string }) {
               key={opt.value}
               onClick={() => setMinScore(opt.value)}
               className={`text-xs px-2 py-1 rounded ${
-                minScore === opt.value
-                  ? 'bg-indigo-100 text-indigo-700 font-medium'
-                  : 'text-slate-500 hover:bg-slate-100'
+                minScore === opt.value ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-slate-500 hover:bg-slate-100'
               }`}
             >
               {opt.label}

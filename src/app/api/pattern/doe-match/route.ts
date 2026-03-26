@@ -1980,25 +1980,51 @@ export async function POST(req: NextRequest) {
       `2. What the shared signals suggest about vulnerability factors or circumstances`,
       `3. What an investigator should look for or verify across these cases`,
       ``,
+      `Then rate the strength of the connection between these cases on a scale of 1–5:`,
+      `1 — Ignore: coincidental overlap, no meaningful investigative link`,
+      `2 — Slim connection: surface-level similarity only`,
+      `3 — Some connection: partial alignment, worth noting`,
+      `4 — Strong connection: meaningful shared signals, warrants investigation`,
+      `5 — Very strong connection: specific and unusual overlap, top priority (reserve for top 5–10% of clusters)`,
+      ``,
+      `Respond in this exact JSON format:`,
+      `{`,
+      `  "narrative": "Your 3–5 sentence analysis here...",`,
+      `  "connection_level": 3`,
+      `}`,
+      ``,
       `Be specific and factual. Do not speculate about perpetrators. Do not state conclusions — only surface patterns for human review.`,
-      `Start with: "This cluster of [N] cases..."`,
     ].join('\n')
 
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
+      max_tokens: 600,
       messages: [{ role: 'user', content: prompt }],
     })
 
-    const narrative = response.content[0]?.type === 'text' ? response.content[0].text.trim() : null
-    if (!narrative) return NextResponse.json({ error: 'AI did not return a narrative' }, { status: 500 })
+    const raw = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
+    if (!raw) return NextResponse.json({ error: 'AI did not return a response' }, { status: 500 })
 
+    let narrative = raw
+    let connectionLevel: number | null = null
+    try {
+      const m = raw.match(/\{[\s\S]*\}/)
+      if (m) {
+        const parsed = JSON.parse(m[0])
+        narrative = parsed.narrative ?? raw
+        const lvl = parseInt(String(parsed.connection_level ?? ''))
+        if (!isNaN(lvl)) connectionLevel = Math.max(1, Math.min(5, lvl))
+      }
+    } catch { /* use raw text as narrative */ }
+
+    const updatedSignals = { ...(c.signals ?? {}), connection_level: connectionLevel }
     await supabase.from('doe_victimology_clusters' as never).update({
       ai_narrative: narrative,
       ai_generated_at: new Date().toISOString(),
+      signals: updatedSignals,
     } as never).eq('id', clusterId)
 
-    return NextResponse.json({ narrative })
+    return NextResponse.json({ narrative, connection_level: connectionLevel })
   }
 
   // ── CONFIRM DOE SUBMISSIONS ─────────────────────────────────────────────────
@@ -3419,7 +3445,19 @@ export async function GET(req: NextRequest) {
   if (reviewerStatus)     q = q.eq('reviewer_status', reviewerStatus)
   if (aiVerdict === 'reviewed') {
     q = (q as unknown as { not: (col: string, op: string, val: null) => CQ }).not('ai_assessment', 'is', null)
+  } else if (aiVerdict === 'strong_plus') {
+    // connection_level 4 or 5 (new system), or legacy verdict=plausible with high confidence
+    q = (q as unknown as { or: (s: string) => CQ }).or(
+      'ai_assessment->>connection_level.gte.4,and(ai_assessment->>verdict.eq.plausible,ai_assessment->>confidence.eq.high)'
+    )
+  } else if (aiVerdict === 'some') {
+    q = q.eq('ai_assessment->>connection_level', '3')
+  } else if (aiVerdict === 'ignore') {
+    q = (q as unknown as { or: (s: string) => CQ }).or(
+      'ai_assessment->>connection_level.lte.2,ai_assessment->>verdict.eq.unlikely'
+    )
   } else if (aiVerdict) {
+    // legacy fallback
     q = q.eq('ai_assessment->>verdict', aiVerdict)
   }
 

@@ -20,13 +20,55 @@ import {
 } from 'lucide-react'
 
 interface AiAssessment {
-  verdict: 'plausible' | 'unlikely' | 'uncertain'
-  confidence: 'high' | 'medium' | 'low'
+  connection_level?: number          // 1–5 (new universal rating)
+  verdict?: 'plausible' | 'unlikely' | 'uncertain'  // legacy — kept for backward compat
+  confidence?: 'high' | 'medium' | 'low'            // legacy
   summary: string
   supporting: string[]
   conflicting: string[]
   reviewed_at: string
   model: string
+}
+
+// ── Universal connection level helpers ────────────────────────────────────────
+
+const CONNECTION_LEVEL_LABEL: Record<number, string> = {
+  1: 'Ignore', 2: 'Slim', 3: 'Some connection', 4: 'Strong', 5: 'Very strong',
+}
+const CONNECTION_LEVEL_COLOR: Record<number, string> = {
+  1: 'bg-slate-100 text-slate-500 border-slate-200',
+  2: 'bg-blue-50 text-blue-600 border-blue-200',
+  3: 'bg-amber-50 text-amber-700 border-amber-200',
+  4: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  5: 'bg-rose-100 text-rose-700 border-rose-300',
+}
+const CONNECTION_LEVEL_CARD: Record<number, string> = {
+  1: 'opacity-50',
+  2: '',
+  3: '',
+  4: 'border-emerald-300 bg-emerald-50/20',
+  5: 'border-rose-300 bg-rose-50/30',
+}
+
+function resolveConnectionLevel(ai: AiAssessment | null): number | null {
+  if (!ai) return null
+  if (ai.connection_level) return ai.connection_level
+  // Derive from legacy verdict
+  if (ai.verdict === 'plausible')  return ai.confidence === 'high' ? 4 : 3
+  if (ai.verdict === 'unlikely')   return 1
+  if (ai.verdict === 'uncertain')  return 2
+  return null
+}
+
+function ConnectionLevelBadge({ level, size = 'sm' }: { level: number; size?: 'sm' | 'xs' }) {
+  const cls = CONNECTION_LEVEL_COLOR[level] ?? CONNECTION_LEVEL_COLOR[2]
+  const label = CONNECTION_LEVEL_LABEL[level] ?? `Level ${level}`
+  return (
+    <span className={`inline-flex items-center gap-1 border rounded-full font-semibold ${size === 'xs' ? 'text-[9px] px-1.5 py-0.5' : 'text-[10px] px-2 py-0.5'} ${cls}`}>
+      <span className="font-black">{level}</span>
+      <span className="opacity-80">{label}</span>
+    </span>
+  )
 }
 
 interface DoeMatchCandidate {
@@ -321,12 +363,12 @@ function MatchCard({ match, onReview }: {
   }
 
   const isDismissed = match.reviewer_status === 'dismissed'
-  const aiPlausible = match.ai_assessment?.verdict === 'plausible'
-  const aiUnlikely  = match.ai_assessment?.verdict === 'unlikely'
+  const aiLevel = resolveConnectionLevel(match.ai_assessment)
+  const aiCardCls = aiLevel ? (CONNECTION_LEVEL_CARD[aiLevel] ?? '') : ''
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <Card className={`overflow-hidden transition-opacity ${isDismissed ? 'opacity-40' : ''} ${aiPlausible ? 'border-green-300 bg-green-50/30' : aiUnlikely ? 'border-slate-200 opacity-60' : ''}`}>
+      <Card className={`overflow-hidden transition-opacity ${isDismissed ? 'opacity-40' : ''} ${aiCardCls}`}>
         <CollapsibleTrigger asChild>
           <button className="w-full text-left">
             <CardContent className="p-4">
@@ -385,15 +427,11 @@ function MatchCard({ match, onReview }: {
 
                 {/* Right side */}
                 <div className="flex-shrink-0 flex flex-col items-end gap-2">
-                  {match.ai_assessment && (
-                    <Badge className={`text-[10px] flex items-center gap-1 ${
-                      match.ai_assessment.verdict === 'plausible' ? 'bg-green-100 text-green-700 border-green-200' :
-                      match.ai_assessment.verdict === 'unlikely'  ? 'bg-slate-100 text-slate-500 border-slate-200' :
-                      'bg-amber-50 text-amber-600 border-amber-200'
-                    }`}>
+                  {match.ai_assessment && aiLevel && (
+                    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${CONNECTION_LEVEL_COLOR[aiLevel] ?? ''}`}>
                       <Sparkles className="h-2.5 w-2.5" />
-                      AI: {match.ai_assessment.verdict}
-                    </Badge>
+                      {aiLevel} — {CONNECTION_LEVEL_LABEL[aiLevel]}
+                    </span>
                   )}
                   <Badge className={`text-[10px] ${STATUS_STYLE[match.reviewer_status]}`}>
                     {match.reviewer_status.replace(/_/g, ' ')}
@@ -522,21 +560,18 @@ function MatchCard({ match, onReview }: {
             })()}
 
             {/* AI assessment panel */}
-            {match.ai_assessment && (
+            {match.ai_assessment && aiLevel && (
               <div className={`p-3 rounded border space-y-1.5 ${
-                match.ai_assessment.verdict === 'plausible' ? 'bg-green-50 border-green-200' :
-                match.ai_assessment.verdict === 'unlikely'  ? 'bg-slate-50 border-slate-200' :
+                aiLevel >= 4 ? 'bg-emerald-50 border-emerald-200' :
+                aiLevel <= 1 ? 'bg-slate-50 border-slate-200' :
+                aiLevel === 5 ? 'bg-rose-50 border-rose-200' :
                 'bg-amber-50 border-amber-200'
               }`}>
-                <p className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${
-                  match.ai_assessment.verdict === 'plausible' ? 'text-green-700' :
-                  match.ai_assessment.verdict === 'unlikely'  ? 'text-slate-500' :
-                  'text-amber-700'
-                }`}>
-                  <Sparkles className="h-3 w-3" />
-                  AI assessment — {match.ai_assessment.verdict}
-                  <span className="font-normal normal-case opacity-60 ml-1">({match.ai_assessment.confidence} confidence)</span>
-                </p>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-3 w-3 text-slate-500" />
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">AI assessment</p>
+                  <ConnectionLevelBadge level={aiLevel} size="xs" />
+                </div>
                 <p className="text-[11px] text-slate-700 leading-relaxed">{match.ai_assessment.summary}</p>
                 {match.ai_assessment.supporting.length > 0 && (
                   <ul className="space-y-0.5">
@@ -662,6 +697,75 @@ function MatchCard({ match, onReview }: {
   )
 }
 
+// ─── Cluster member comparison modal ─────────────────────────────────────────
+
+function ClusterCompareModal({
+  open, onClose, submissionIds, missingCaseId,
+}: {
+  open: boolean
+  onClose: () => void
+  submissionIds: string[]
+  missingCaseId: string
+}) {
+  const [records, setRecords] = useState<Array<{ id: string; raw_text: string; name: string | null }>>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open || !submissionIds.length) return
+    setLoading(true)
+    Promise.all(
+      submissionIds.map(async id => {
+        try {
+          const res = await fetch(`/api/pattern/doe-match?missingCaseId=${missingCaseId}&type=submission&submissionId=${id}`)
+          const data = await res.json()
+          return { id, raw_text: (data.raw_text as string) ?? '', name: (data.name as string | null) ?? null }
+        } catch {
+          return { id, raw_text: 'Could not load record.', name: null }
+        }
+      })
+    ).then(r => { setRecords(r); setLoading(false) })
+  }, [open, submissionIds.join(','), missingCaseId])
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl my-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">Case comparison — cluster members</h2>
+            <p className="text-[11px] text-slate-400 mt-0.5">{submissionIds.length} cases selected for comparison</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {loading ? (
+          <div className="py-16 text-center"><Loader2 className="h-6 w-6 animate-spin text-slate-300 mx-auto" /></div>
+        ) : (
+          <div className={`grid gap-4 p-5 overflow-x-auto`} style={{ gridTemplateColumns: `repeat(${Math.min(records.length, 3)}, 1fr)` }}>
+            {records.map((r, i) => (
+              <div key={r.id}>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                  <span className="bg-indigo-100 text-indigo-700 rounded-full w-4 h-4 flex items-center justify-center text-[9px] font-black flex-shrink-0">{i + 1}</span>
+                  {r.name ?? <span className="font-mono">{r.id.slice(0, 8)}…</span>}
+                </p>
+                <pre className="text-[10px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2 whitespace-pre-wrap leading-relaxed max-h-[60vh] overflow-y-auto font-mono">
+                  {r.raw_text || 'Record not found.'}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
+          <p className="text-[10px] text-slate-400">Comparison for investigator reference only. Not a conclusion.</p>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const CLUSTER_TYPE_META: Record<string, { label: string; borderColor: string; iconBg: string; iconColor: string }> = {
   circumstance_signal:      { label: 'Circumstance',    borderColor: 'border-l-rose-400',    iconBg: 'bg-rose-100',    iconColor: 'text-rose-600' },
   demographic_temporal:     { label: 'Demographic',     borderColor: 'border-l-indigo-400',  iconBg: 'bg-indigo-100',  iconColor: 'text-indigo-600' },
@@ -680,11 +784,13 @@ const MEMBER_STATUS_STYLE: Record<string, string> = {
   rejected:  'bg-red-50 text-red-500',
 }
 
-function ClusterMemberRow({ member, missingCaseId, onReviewMember, isAiFlagged }: {
+function ClusterMemberRow({ member, missingCaseId, onReviewMember, isAiFlagged, selected, onToggleSelect }: {
   isAiFlagged?: boolean
   member: DoeClusterMember
   missingCaseId: string
   onReviewMember: (id: string, status: 'confirmed' | 'rejected' | 'candidate') => void
+  selected?: boolean
+  onToggleSelect?: () => void
 }) {
   const [showRecord, setShowRecord] = useState(false)
   const [record, setRecord] = useState<string | null>(null)
@@ -712,7 +818,17 @@ function ClusterMemberRow({ member, missingCaseId, onReviewMember, isAiFlagged }
   return (
     <div className={`flex items-start gap-2 p-2 rounded text-[10px] transition-opacity
       ${isRejected ? 'opacity-40' : ''}
-      ${isAiFlagged ? 'border border-violet-200 bg-violet-50' : 'border border-slate-100'}`}>
+      ${selected ? 'border border-indigo-300 bg-indigo-50' : isAiFlagged ? 'border border-violet-200 bg-violet-50' : 'border border-slate-100'}`}>
+      {/* Select checkbox */}
+      {onToggleSelect && (
+        <input
+          type="checkbox"
+          checked={selected ?? false}
+          onChange={onToggleSelect}
+          className="mt-1 flex-shrink-0 accent-indigo-600 cursor-pointer"
+          title="Select for comparison"
+        />
+      )}
       {/* Confidence */}
       <div className="flex-shrink-0 text-center w-8">
         <div className={`text-sm font-black ${pct >= 85 ? 'text-emerald-700' : pct >= 75 ? 'text-amber-600' : 'text-slate-500'}`}>{pct}%</div>
@@ -809,6 +925,8 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
   const [open, setOpen] = useState(false)
   const [members, setMembers] = useState<DoeClusterMember[] | null>(null)
   const [membersLoading, setMembersLoading] = useState(false)
+  const [compareSelections, setCompareSelections] = useState<Set<string>>(new Set())
+  const [clusterCompareOpen, setClusterCompareOpen] = useState(false)
 
   const isCircumstance = cluster.cluster_type === 'circumstance_signal'
 
@@ -1205,19 +1323,53 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                   <p className="text-[10px] text-slate-400 italic">No member records yet — re-run the cluster detection to populate.</p>
                 )}
                 {!membersLoading && members && members.length > 0 && (
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                    {members.map(m => (
-                      <ClusterMemberRow
-                        key={m.id}
-                        member={m}
-                        missingCaseId={missingCaseId}
-                        onReviewMember={handleMemberReview}
-                        isAiFlagged={
-                          Array.isArray((cluster.signals as { ai_flagged_ids?: string[] }).ai_flagged_ids) &&
-                          ((cluster.signals as { ai_flagged_ids?: string[] }).ai_flagged_ids ?? []).includes(m.submission_id)
-                        }
-                      />
-                    ))}
+                  <div className="space-y-1.5">
+                    {compareSelections.size > 0 && (
+                      <div className="flex items-center gap-2 py-1.5 px-2 bg-indigo-50 border border-indigo-200 rounded text-[10px] text-indigo-700">
+                        <span className="font-semibold">{compareSelections.size} selected</span>
+                        <Button
+                          size="sm"
+                          disabled={compareSelections.size < 2}
+                          className="h-5 text-[9px] px-2 bg-indigo-600 hover:bg-indigo-700 text-white ml-1"
+                          onClick={() => setClusterCompareOpen(true)}
+                        >
+                          Compare side by side
+                        </Button>
+                        <button
+                          className="ml-auto text-indigo-400 hover:text-indigo-600 underline"
+                          onClick={() => setCompareSelections(new Set())}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {members.map(m => (
+                        <ClusterMemberRow
+                          key={m.id}
+                          member={m}
+                          missingCaseId={missingCaseId}
+                          onReviewMember={handleMemberReview}
+                          isAiFlagged={
+                            Array.isArray((cluster.signals as { ai_flagged_ids?: string[] }).ai_flagged_ids) &&
+                            ((cluster.signals as { ai_flagged_ids?: string[] }).ai_flagged_ids ?? []).includes(m.submission_id)
+                          }
+                          selected={compareSelections.has(m.submission_id)}
+                          onToggleSelect={() => setCompareSelections(prev => {
+                            const next = new Set(prev)
+                            if (next.has(m.submission_id)) {
+                              next.delete(m.submission_id)
+                            } else if (next.size < 3) {
+                              next.add(m.submission_id)
+                            }
+                            return next
+                          })}
+                        />
+                      ))}
+                    </div>
+                    {compareSelections.size === 0 && members.length >= 2 && (
+                      <p className="text-[9px] text-slate-400 italic px-1">Tick checkboxes to compare cases side by side (up to 3)</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1226,9 +1378,15 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
             {/* AI narrative */}
             {cluster.ai_narrative && (
               <div className="p-3 bg-violet-50 border border-violet-100 rounded space-y-1.5">
-                <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide flex items-center gap-1">
-                  <Brain className="h-3 w-3" />AI analysis
-                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide flex items-center gap-1">
+                    <Brain className="h-3 w-3" />AI analysis
+                  </p>
+                  {(() => {
+                    const lvl = (cluster.signals as { connection_level?: number }).connection_level
+                    return lvl ? <ConnectionLevelBadge level={lvl} size="xs" /> : null
+                  })()}
+                </div>
                 <p className="text-[11px] text-violet-900 leading-relaxed">{cluster.ai_narrative}</p>
                 {(cluster.signals as { ai_flag_reason?: string | null }).ai_flag_reason && (
                   <div className="mt-1 pt-1.5 border-t border-violet-100">
@@ -1274,6 +1432,12 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
           </div>
         </CollapsibleContent>
       </Card>
+      <ClusterCompareModal
+        open={clusterCompareOpen}
+        onClose={() => setClusterCompareOpen(false)}
+        submissionIds={[...compareSelections]}
+        missingCaseId={missingCaseId}
+      />
     </Collapsible>
   )
 }
@@ -1606,13 +1770,16 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const [confirmRunning, setConfirmRunning] = useState(false)
   const [aiReviewRunning, setAiReviewRunning] = useState(false)
   const [aiReviewProgress, setAiReviewProgress] = useState<{ reviewed: number; remaining: number } | null>(null)
+  const [routeAiReviewRunning, setRouteAiReviewRunning] = useState(false)
+  const [routeAiReviewProgress, setRouteAiReviewProgress] = useState<{ reviewed: number; remaining: number } | null>(null)
   const [clusterTypeFilter, setClusterTypeFilter] = useState<'all' | 'demographic_temporal' | 'circumstance_signal' | 'same_date_proximity' | 'location_runaway_cluster' | 'corridor_cluster' | 'age_bracket' | 'demographic_hotspot' | 'highway_proximity' | 'national_park_proximity'>('all')
   const [clusterSort, setClusterSort] = useState<'urgency' | 'count'>('urgency')
   const [stallTypeFilter, setStallTypeFilter] = useState<'all' | 'voluntary_misclassification' | 'runaway_no_followup' | 'quick_closure_young'>('all')
   const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'person_name' | 'vehicle' | 'possible_duplicate'>('all')
   const [signalCountFilter, setSignalCountFilter] = useState(0)
   const [marksFilter, setMarksFilter] = useState(false)
-  const [aiVerdictFilter, setAiVerdictFilter] = useState<'all' | 'plausible' | 'uncertain' | 'unlikely' | 'reviewed'>('all')
+  const [aiVerdictFilter, setAiVerdictFilter] = useState<'all' | 'strong_plus' | 'some' | 'ignore' | 'reviewed'>('all')
+  const [clusterReviewFilter, setClusterReviewFilter] = useState<'all' | 'worth_investigating' | 'unreviewed'>('all')
   const [personShowLimit, setPersonShowLimit] = useState<Map<string, number>>(new Map())
   const [tattooSearchOpen, setTattooSearchOpen] = useState(false)
   const [tattooKeyword, setTattooKeyword] = useState('')
@@ -2062,6 +2229,40 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     }
   }, [effectiveCaseId, queryClient])
 
+  const runRouteAiReviews = useCallback(async () => {
+    setRouteAiReviewRunning(true)
+    setRouteAiReviewProgress({ reviewed: 0, remaining: 0 })
+    let totalReviewed = 0
+    let consecutiveErrors = 0
+    try {
+      while (true) {
+        let data: { reviewed: number; hasMore: boolean; remaining: number } | null = null
+        try {
+          const res = await fetch('/api/pattern/doe-match/ai-review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ missingCaseId: effectiveCaseId, batchSize: 5, routeMatches: true }),
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          data = await res.json() as { reviewed: number; hasMore: boolean; remaining: number }
+          consecutiveErrors = 0
+        } catch {
+          consecutiveErrors++
+          if (consecutiveErrors >= 3) break
+          await new Promise(r => setTimeout(r, 2000))
+          continue
+        }
+        totalReviewed += data.reviewed
+        setRouteAiReviewProgress({ reviewed: totalReviewed, remaining: data.remaining })
+        if (!data.hasMore || data.reviewed === 0) break
+        await new Promise(r => setTimeout(r, 500))
+      }
+      queryClient.invalidateQueries({ queryKey: ['doe-route-matches', effectiveCaseId] })
+    } finally {
+      setRouteAiReviewRunning(false)
+    }
+  }, [effectiveCaseId, queryClient])
+
   async function runTattooSearch() {
     const kw = tattooKeyword.trim()
     if (!kw || kw.length < 2) return
@@ -2337,20 +2538,14 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
               </span>
               <div className="flex gap-1 flex-wrap">
                 {([
-                  { value: 'all',      label: 'All',      cls: 'bg-white text-slate-600 border-slate-300 hover:border-slate-400' },
-                  { value: 'reviewed', label: 'Reviewed', cls: 'bg-white text-slate-600 border-slate-300 hover:border-slate-400' },
-                  { value: 'plausible',label: '✓ Plausible', cls: 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100' },
-                  { value: 'uncertain',label: '? Uncertain', cls: 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' },
-                  { value: 'unlikely', label: '✗ Unlikely',  cls: 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200' },
+                  { value: 'all',         label: 'All',              cls: 'bg-white text-slate-600 border-slate-300 hover:border-slate-400',            active: 'bg-slate-900 text-white border-slate-900' },
+                  { value: 'reviewed',    label: 'Has AI review',    cls: 'bg-white text-slate-600 border-slate-300 hover:border-slate-400',            active: 'bg-slate-900 text-white border-slate-900' },
+                  { value: 'strong_plus', label: '4–5 Strong+',      cls: 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100',    active: 'bg-emerald-700 text-white border-emerald-700' },
+                  { value: 'some',        label: '3 Some connection', cls: 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100',           active: 'bg-amber-600 text-white border-amber-600' },
+                  { value: 'ignore',      label: '1–2 Ignore/Slim',  cls: 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200',          active: 'bg-slate-500 text-white border-slate-500' },
                 ] as const).map(f => (
                   <button key={f.value} onClick={() => { setAiVerdictFilter(f.value); setPage(0) }}
-                    className={`px-2.5 py-1 text-[11px] font-medium rounded border transition-colors
-                      ${aiVerdictFilter === f.value
-                        ? f.value === 'plausible' ? 'bg-green-600 text-white border-green-600'
-                        : f.value === 'uncertain' ? 'bg-amber-500 text-white border-amber-500'
-                        : f.value === 'unlikely'  ? 'bg-slate-500 text-white border-slate-500'
-                        : 'bg-slate-900 text-white border-slate-900'
-                        : f.cls}`}>
+                    className={`px-2.5 py-1 text-[11px] font-medium rounded border transition-colors ${aiVerdictFilter === f.value ? f.active : f.cls}`}>
                     {f.label}
                   </button>
                 ))}
@@ -2390,25 +2585,42 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         )}
         <div className="flex flex-wrap gap-2 items-center">
         {activeTab === 'clusters' && (
-          <div className="flex gap-1 flex-wrap">
-            {([
-              { value: 'all',                      label: 'All' },
-              { value: 'demographic_temporal',     label: 'Demographic' },
-              { value: 'circumstance_signal',      label: 'Circumstance' },
-              { value: 'same_date_proximity',      label: 'Same date' },
-              { value: 'location_runaway_cluster', label: 'Location runaway' },
-              { value: 'corridor_cluster',         label: 'Corridor' },
-              { value: 'age_bracket',              label: 'Age bracket' },
-              { value: 'demographic_hotspot',      label: 'Hotspot' },
-              { value: 'highway_proximity',        label: 'Hwy proximity' },
-              { value: 'national_park_proximity',  label: 'Wilderness' },
-            ] as const).map(f => (
-              <button key={f.value} onClick={() => { setClusterTypeFilter(f.value); setPage(0) }}
-                className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
-                  ${clusterTypeFilter === f.value ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
-                {f.label}
-              </button>
-            ))}
+          <div className="space-y-2">
+            <div className="flex gap-1 flex-wrap">
+              {([
+                { value: 'all',                      label: 'All' },
+                { value: 'demographic_temporal',     label: 'Demographic' },
+                { value: 'circumstance_signal',      label: 'Circumstance' },
+                { value: 'same_date_proximity',      label: 'Same date' },
+                { value: 'location_runaway_cluster', label: 'Location runaway' },
+                { value: 'corridor_cluster',         label: 'Corridor' },
+                { value: 'age_bracket',              label: 'Age bracket' },
+                { value: 'demographic_hotspot',      label: 'Hotspot' },
+                { value: 'highway_proximity',        label: 'Hwy proximity' },
+                { value: 'national_park_proximity',  label: 'Wilderness' },
+              ] as const).map(f => (
+                <button key={f.value} onClick={() => { setClusterTypeFilter(f.value); setPage(0) }}
+                  className={`px-2 py-0.5 text-[11px] rounded-full border transition-colors
+                    ${clusterTypeFilter === f.value ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-400 font-medium">Review status:</span>
+              <div className="flex gap-1 flex-wrap">
+                {([
+                  { value: 'all',                 label: 'All',                 cls: 'bg-white text-slate-600 border-slate-300',             active: 'bg-slate-900 text-white border-slate-900' },
+                  { value: 'worth_investigating', label: 'Worth investigating', cls: 'bg-amber-50 text-amber-700 border-amber-300',           active: 'bg-amber-600 text-white border-amber-600' },
+                  { value: 'unreviewed',          label: 'Unreviewed',          cls: 'bg-white text-slate-500 border-slate-200',              active: 'bg-slate-700 text-white border-slate-700' },
+                ] as const).map(f => (
+                  <button key={f.value} onClick={() => setClusterReviewFilter(f.value)}
+                    className={`px-2.5 py-0.5 text-[11px] font-medium rounded-full border transition-colors ${clusterReviewFilter === f.value ? f.active : f.cls}`}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
         {activeTab === 'stalls' && (
@@ -2701,10 +2913,26 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
           {/* Route match info banner */}
           <div className="flex items-start gap-2 bg-teal-50 border border-teal-200 rounded-lg p-3">
             <MapPin className="h-3.5 w-3.5 text-teal-500 flex-shrink-0 mt-0.5" />
-            <p className="text-[11px] text-teal-700">
-              These candidates share physical characteristics with the missing person AND were found near or along
-              their believed route of travel. Destination extracted from circumstances text.
-            </p>
+            <div className="flex-1">
+              <p className="text-[11px] text-teal-700">
+                These candidates share physical characteristics with the missing person AND were found near or along
+                their believed route of travel. Destination extracted from circumstances text.
+              </p>
+            </div>
+            {canManage && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px] gap-1 border-violet-200 text-violet-600 flex-shrink-0"
+                disabled={routeAiReviewRunning}
+                onClick={runRouteAiReviews}
+              >
+                {routeAiReviewRunning
+                  ? <><Loader2 className="h-3 w-3 animate-spin" />AI reviewing… {routeAiReviewProgress?.reviewed ?? 0}</>
+                  : <><Sparkles className="h-3 w-3" />AI review route matches</>
+                }
+              </Button>
+            )}
           </div>
 
           {routeMatchQuery.isLoading ? (
@@ -2843,14 +3071,20 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
                 </div>
               </div>
               <div className="space-y-2">
-                {[...clusters].sort((a, b) => {
-                  if (clusterSort === 'urgency') {
-                    const ua = (a.signals as { ai_urgency?: number }).ai_urgency ?? 0
-                    const ub = (b.signals as { ai_urgency?: number }).ai_urgency ?? 0
-                    return ub - ua || b.case_count - a.case_count
-                  }
-                  return b.case_count - a.case_count
-                }).map(c => (
+                {[...clusters]
+                  .filter(c => {
+                    if (clusterReviewFilter === 'worth_investigating') return c.reviewer_status === 'worth_investigating'
+                    if (clusterReviewFilter === 'unreviewed') return c.reviewer_status === 'unreviewed'
+                    return true
+                  })
+                  .sort((a, b) => {
+                    if (clusterSort === 'urgency') {
+                      const ua = (a.signals as { ai_urgency?: number }).ai_urgency ?? 0
+                      const ub = (b.signals as { ai_urgency?: number }).ai_urgency ?? 0
+                      return ub - ua || b.case_count - a.case_count
+                    }
+                    return b.case_count - a.case_count
+                  }).map(c => (
                   <ClusterCard key={c.id} cluster={c} missingCaseId={effectiveCaseId} onReview={reviewCluster} onSynthesize={synthesizeCluster} onReviewMember={reviewClusterMember} />
                 ))}
               </div>
