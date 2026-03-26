@@ -15,6 +15,8 @@ import {
   MapPin,
   Link2,
   Eye,
+  Brain,
+  GitMerge,
 } from 'lucide-react'
 
 const GRADE_COLORS: Record<string, string> = {
@@ -131,6 +133,24 @@ export default async function IntelligencePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Analysis link */}
+      <Link href="/intelligence/analysis">
+        <Card className="hover:shadow-md transition-shadow cursor-pointer border-indigo-200 bg-indigo-50">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-100">
+                <Brain className="h-5 w-5 text-indigo-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-indigo-900 text-sm">Global Analysis</h3>
+                <p className="text-xs text-indigo-700">DOE matching, offender overlaps, corridor analysis, geographic clustering, social network</p>
+              </div>
+            </div>
+            <ChevronRight className="h-5 w-5 text-indigo-400" />
+          </CardContent>
+        </Card>
+      </Link>
 
       {/* Type breakdown pills */}
       {Object.keys(typeCounts).length > 0 && (
