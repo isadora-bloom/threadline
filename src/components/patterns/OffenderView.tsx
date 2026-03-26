@@ -618,6 +618,41 @@ export function OffenderView({ caseId }: { caseId: string }) {
   const [sortKey, setSortKey] = useState<SortKey>('overlap_count')
   const [showOnlyOverlaps, setShowOnlyOverlaps] = useState(true)
   const [minScore, setMinScore] = useState(65)
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<{ reviewed: number; remaining: number } | null>(null)
+
+  async function runBatchAiReview() {
+    setBatchRunning(true)
+    setBatchProgress({ reviewed: 0, remaining: 0 })
+    let totalReviewed = 0
+    let consecutiveErrors = 0
+    try {
+      while (true) {
+        let data: { reviewed: number; hasMore: boolean; remaining: number } | null = null
+        try {
+          const res = await fetch('/api/pattern/offenders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'batch_ai_review', caseId, batchSize: 5, minScore }),
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          data = await res.json() as { reviewed: number; hasMore: boolean; remaining: number }
+          consecutiveErrors = 0
+        } catch {
+          consecutiveErrors++
+          if (consecutiveErrors >= 3) break
+          await new Promise(r => setTimeout(r, 2000))
+          continue
+        }
+        totalReviewed += data.reviewed
+        setBatchProgress({ reviewed: totalReviewed, remaining: data.remaining })
+        if (!data.hasMore || data.reviewed === 0) break
+        await new Promise(r => setTimeout(r, 600))
+      }
+    } finally {
+      setBatchRunning(false)
+    }
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ['offender-list', caseId, minScore],
@@ -664,6 +699,30 @@ export function OffenderView({ caseId }: { caseId: string }) {
           <span><span className="font-semibold text-slate-900">{totalOverlaps.toLocaleString()}</span> total overlaps</span>
         </div>
       )}
+
+      {/* Batch AI review */}
+      <div className="flex items-center gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs gap-1.5 border-violet-200 text-violet-700 hover:bg-violet-50"
+          disabled={batchRunning}
+          onClick={runBatchAiReview}
+        >
+          {batchRunning
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />AI reviewing… {batchProgress?.reviewed ?? 0} done</>
+            : <><Sparkles className="h-3.5 w-3.5" />AI review top overlaps</>
+          }
+        </Button>
+        {batchProgress && !batchRunning && (
+          <span className="text-xs text-slate-500">
+            {batchProgress.reviewed} reviewed · {batchProgress.remaining} remaining — expand any offender to see results
+          </span>
+        )}
+        {batchRunning && batchProgress && batchProgress.remaining > 0 && (
+          <span className="text-xs text-slate-400">{batchProgress.remaining} still queued</span>
+        )}
+      </div>
 
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">

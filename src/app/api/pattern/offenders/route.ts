@@ -116,14 +116,101 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: 'Unknown type' }, { status: 400 })
 }
 
-// ── POST: AI review of an offender overlap ───────────────────────────────────
+// ── POST: AI review of an offender overlap (single or batch) ─────────────────
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { offenderId, submissionId } = await req.json()
+  const body = await req.json()
+
+  // ── Batch: review top unreviewed overlaps for a case ──────────────────────
+  if (body.action === 'batch_ai_review') {
+    const { caseId, batchSize = 10, minScore: ms = 65 } = body
+    if (!caseId) return NextResponse.json({ error: 'caseId required' }, { status: 400 })
+
+    // Pull top-scoring overlaps without ai_assessment, across all offenders
+    const { data: pending } = await supabase
+      .from('offender_case_overlaps' as never)
+      .select('offender_id,submission_id')
+      .eq('case_id', caseId as never)
+      .is('ai_assessment', null)
+      .gte('composite_score', ms as never)
+      .order('composite_score', { ascending: false })
+      .limit(batchSize) as { data: Array<{ offender_id: string; submission_id: string }> | null }
+
+    if (!pending?.length) return NextResponse.json({ reviewed: 0, hasMore: false, remaining: 0 })
+
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) return NextResponse.json({ error: 'AI service not configured' }, { status: 503 })
+
+    type KnownOffenderRow = { name: string; aliases: string[] | null; active_from: number | null; active_to: number | null; incarcerated_from: number | null; home_states: string[] | null; operation_states: string[] | null; victim_sex: string | null; victim_races: string[] | null; victim_age_typical: number | null; mo_keywords: string[] | null; signature_details: string | null }
+    type SubRow = { raw_text: string }
+    type OverlapRow = { composite_score: number; matched_mo_keywords: string[] | null }
+
+    let reviewed = 0
+    for (const { offender_id, submission_id } of pending) {
+      const [{ data: offender }, { data: sub }, { data: overlap }] = await Promise.all([
+        supabase.from('known_offenders').select('name,aliases,active_from,active_to,incarcerated_from,home_states,operation_states,victim_sex,victim_races,victim_age_min,victim_age_max,victim_age_typical,mo_keywords,signature_details').eq('id', offender_id).single() as unknown as Promise<{ data: KnownOffenderRow | null }>,
+        supabase.from('submissions').select('raw_text').eq('id', submission_id).single() as unknown as Promise<{ data: SubRow | null }>,
+        supabase.from('offender_case_overlaps' as never).select('composite_score,matched_mo_keywords').eq('offender_id', offender_id as never).eq('submission_id', submission_id as never).single() as unknown as Promise<{ data: OverlapRow | null }>,
+      ])
+      if (!offender || !sub || !overlap) continue
+
+      const offenderProfile = [
+        `Name: ${offender.name}`,
+        offender.aliases?.length ? `Aliases: ${offender.aliases.join(', ')}` : null,
+        offender.active_from ? `Active: ${offender.active_from}–${offender.active_to ?? 'unknown'}` : null,
+        offender.incarcerated_from ? `Incarcerated: ${offender.incarcerated_from}` : null,
+        `Home states: ${(offender.home_states ?? []).join(', ') || 'unknown'}`,
+        `Operated in: ${(offender.operation_states ?? []).join(', ') || 'unknown'}`,
+        offender.victim_sex ? `Typical victims: ${offender.victim_sex}` : null,
+        offender.victim_age_typical ? `Typical victim age: ${offender.victim_age_typical}` : null,
+        (offender.victim_races ?? []).length ? `Victim races: ${(offender.victim_races as string[]).join(', ')}` : null,
+        (offender.mo_keywords ?? []).length ? `MO: ${(offender.mo_keywords as string[]).join(', ')}` : null,
+        offender.signature_details ? `Signature: ${offender.signature_details}` : null,
+      ].filter(Boolean).join('\n')
+
+      const { default: Anthropic } = await import('@anthropic-ai/sdk')
+      const anthropic = new Anthropic({ apiKey })
+      const msg = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        system: `You are a forensic analyst helping investigators assess whether a missing person case shares patterns with a known offender's profile.\n\nRate the strength of the possible connection on a scale of 1–5:\n1 — Ignore: no meaningful overlap, coincidental similarity\n2 — Slim connection: surface-level geographic or demographic overlap only\n3 — Some connection: partial pattern alignment, worth noting\n4 — Strong connection: multiple signals align with offender profile, warrants investigative attention\n5 — Very strong connection: specific MO, geography, demographics, and timeline all align closely (top 5–10% only)\n\nRespond with valid JSON only:\n{\n  "connection_level": 3,\n  "summary": "One or two sentences explaining your assessment",\n  "supporting": ["specific overlap detail"],\n  "conflicting": ["specific reason against connection"]\n}\n\nThis is a signal for investigators, not a conclusion. Never name the case subject as a victim.`,
+        messages: [{ role: 'user', content: `OFFENDER PROFILE:\n${offenderProfile}\n\n---\n\nCASE RECORD:\n${sub.raw_text}\n\n---\n\nPattern overlap score: ${overlap.composite_score}/100. Matched MO keywords: ${(overlap.matched_mo_keywords ?? []).join(', ') || 'none'}.` }],
+      })
+
+      let assessment: Record<string, unknown> = { connection_level: 2, summary: 'AI response could not be parsed.', supporting: [], conflicting: [] }
+      const text = msg.content[0].type === 'text' ? msg.content[0].text : ''
+      try {
+        const m = text.match(/\{[\s\S]*\}/)
+        if (m) {
+          const parsed = JSON.parse(m[0])
+          const lvl = parseInt(String(parsed.connection_level ?? 2))
+          assessment = { ...parsed, connection_level: Math.max(1, Math.min(5, isNaN(lvl) ? 2 : lvl)) }
+        }
+      } catch { /* keep default */ }
+
+      const result = { ...assessment, reviewed_at: new Date().toISOString(), model: 'claude-haiku-4-5-20251001' }
+      await supabase.from('offender_case_overlaps' as never).update({ ai_assessment: result } as never)
+        .eq('offender_id', offender_id as never).eq('submission_id', submission_id as never)
+      reviewed++
+    }
+
+    // Count remaining
+    const { count } = await supabase
+      .from('offender_case_overlaps' as never)
+      .select('offender_id', { count: 'exact', head: true })
+      .eq('case_id', caseId as never)
+      .is('ai_assessment', null)
+      .gte('composite_score', ms as never) as { count: number | null }
+
+    return NextResponse.json({ reviewed, hasMore: (count ?? 0) > 0, remaining: count ?? 0 })
+  }
+
+  // ── Single review ──────────────────────────────────────────────────────────
+  const { offenderId, submissionId } = body
   if (!offenderId || !submissionId) return NextResponse.json({ error: 'offenderId and submissionId required' }, { status: 400 })
 
   const apiKey = process.env.ANTHROPIC_API_KEY
