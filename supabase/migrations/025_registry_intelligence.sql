@@ -275,7 +275,7 @@ CREATE POLICY "import_records_select" ON import_records
 
 -- Import records: insert/update by service role only (scrapers run as service role)
 CREATE POLICY "import_records_insert" ON import_records
-  FOR INSERT TO service_role USING (true);
+  FOR INSERT TO service_role WITH CHECK (true);
 CREATE POLICY "import_records_update" ON import_records
   FOR UPDATE TO service_role USING (true);
 
@@ -285,7 +285,7 @@ CREATE POLICY "iq_select" ON intelligence_queue
 
 -- Intelligence queue: insert by service role or authenticated (AI pipeline + manual flags)
 CREATE POLICY "iq_insert" ON intelligence_queue
-  FOR INSERT TO authenticated USING (true);
+  FOR INSERT TO authenticated WITH CHECK (true);
 
 -- Intelligence queue: update by authenticated (for review actions)
 CREATE POLICY "iq_update" ON intelligence_queue
@@ -297,7 +297,7 @@ CREATE POLICY "gc_select" ON global_connections
 
 -- Global connections: insert by service role (AI pipeline)
 CREATE POLICY "gc_insert" ON global_connections
-  FOR INSERT TO service_role USING (true);
+  FOR INSERT TO service_role WITH CHECK (true);
 
 -- Global connections: update by authenticated (for review)
 CREATE POLICY "gc_update" ON global_connections
@@ -309,7 +309,7 @@ CREATE POLICY "dr_select" ON deep_research
 
 -- Deep research: insert by authenticated (anyone can request research)
 CREATE POLICY "dr_insert" ON deep_research
-  FOR INSERT TO authenticated USING (true);
+  FOR INSERT TO authenticated WITH CHECK (true);
 
 -- Deep research: update by service role (AI pipeline writes results)
 CREATE POLICY "dr_update" ON deep_research

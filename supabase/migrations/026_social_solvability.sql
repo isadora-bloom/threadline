@@ -188,7 +188,7 @@ CREATE POLICY "watchlist_own" ON user_watchlist
 CREATE POLICY "solvability_select" ON solvability_scores
   FOR SELECT TO authenticated USING (true);
 CREATE POLICY "solvability_write" ON solvability_scores
-  FOR INSERT TO service_role USING (true);
+  FOR INSERT TO service_role WITH CHECK (true);
 CREATE POLICY "solvability_update" ON solvability_scores
   FOR UPDATE TO service_role USING (true);
 
