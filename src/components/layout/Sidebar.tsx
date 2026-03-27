@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useParams, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Briefcase, LogOut, Radar, Users, Search, Flame, BookOpen, Brain } from 'lucide-react'
+import { Briefcase, LogOut, Radar, Users, Search, Flame, BookOpen, Brain, Star } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -113,9 +113,10 @@ export function Sidebar() {
     { href: '/intelligence', label: 'Intelligence', icon: Radar, badge: queueCount },
     { href: '/intelligence/analysis', label: 'Analysis', icon: Brain },
     { href: '/registry', label: 'Registry', icon: Search },
-    { href: '/needing-attention', label: 'Cases That Need You', icon: Flame },
-    { href: '/cases', label: 'My Cases', icon: Briefcase },
+    { href: '/my-watchlist', label: 'My Watchlist', icon: Star },
+    { href: '/needing-attention', label: 'Needs You', icon: Flame },
     { href: '/research', label: 'Research', icon: BookOpen },
+    { href: '/cases', label: 'Investigations', icon: Briefcase },
   ]
 
   return (
