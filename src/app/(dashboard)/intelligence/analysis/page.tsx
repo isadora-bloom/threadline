@@ -102,8 +102,8 @@ export default function GlobalAnalysisPage() {
         supabase.from('intelligence_queue').select('id', { count: 'exact', head: true }).eq('status', 'new'),
         supabase.from('intelligence_queue').select('id', { count: 'exact', head: true }).eq('status', 'actioned'),
         supabase.from('global_connections').select('id', { count: 'exact', head: true }).gte('composite_score', 41),
-        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }),
-        supabase.from('offender_case_overlaps').select('id', { count: 'exact', head: true }),
+        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }).gte('composite_score', 30),
+        supabase.from('offender_case_overlaps').select('id', { count: 'exact', head: true }).gte('composite_score', 65),
       ])
 
       return {
