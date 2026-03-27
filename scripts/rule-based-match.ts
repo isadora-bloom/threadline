@@ -15,7 +15,8 @@
  * Usage: npx tsx scripts/rule-based-match.ts [--state VA] [--limit 5000]
  */
 
-import 'dotenv/config'
+import dotenv from 'dotenv'
+dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(

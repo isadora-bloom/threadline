@@ -19,7 +19,8 @@
  *   npx tsx scripts/ai-targeted-extract.ts [--limit 100] [--model haiku]
  */
 
-import 'dotenv/config'
+import dotenv from 'dotenv'
+dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 

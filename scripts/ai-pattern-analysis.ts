@@ -17,7 +17,8 @@
  *   npx tsx scripts/ai-pattern-analysis.ts [--state VA] [--limit 500]
  */
 
-import 'dotenv/config'
+import dotenv from 'dotenv'
+dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 

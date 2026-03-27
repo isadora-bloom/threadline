@@ -12,7 +12,8 @@
  * Usage: npx tsx scripts/populate-intelligence-queue.ts
  */
 
-import 'dotenv/config'
+import dotenv from 'dotenv'
+dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(

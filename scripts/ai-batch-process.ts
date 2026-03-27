@@ -12,7 +12,8 @@
  * Usage: npx tsx scripts/ai-batch-process.ts [--limit 50] [--type missing_person|unidentified_remains]
  */
 
-import 'dotenv/config'
+import dotenv from 'dotenv'
+dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 
