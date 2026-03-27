@@ -152,9 +152,12 @@ function parseBodyState(rawText: string): BodyState {
   if (s.includes('mummif') || s.includes('saponif'))              return 'advanced'
   if (s.includes('advanced decomp') || s.includes('severe decomp') ||
       s.includes('heavily decomp') || s.includes('extensive decomp')) return 'advanced'
-  if (s.includes('decomp'))                                        return 'moderate'
+  if (s.includes('decomp') || s.includes('putrefaction'))         return 'moderate'
   if (s.includes('intact') || s.includes('well preserved') ||
-      s.includes('fresh') || s.includes('recent'))                return 'intact'
+      s.includes('fresh') || s.includes('recent') ||
+      s.includes('recognizable'))                                 return 'intact'
+  // NamUs uses "Not recognizable" as a prefix — if nothing else matched, it's moderate+
+  if (s.includes('not recognizable'))                             return 'moderate'
   return 'unknown'
 }
 
@@ -630,11 +633,18 @@ function scoreHair(a: ParsedCase, b: ParsedCase): SignalResult {
   }
   const ha = normH(a.hair), hb = normH(b.hair)
   if (!ha || !hb) return { score: 0, match: 'unknown' }
-  if (ha === hb)  return { score: 8, match: 'exact' }
+  if (ha === hb) return { score: 8, match: 'exact' }
   for (const [x, y] of HAIR_ADJACENT) {
     if ((ha === x && hb === y) || (ha === y && hb === x)) return { score: 3, match: 'adjacent' }
   }
-  return { score: 0, match: 'no_match' }
+  // Non-adjacent hair mismatch is NOT a hard zero. Hair can change:
+  //  - Dyed (blonde → brown, brown → red, etc.)
+  //  - Darkens with age (blonde → brown is extremely common)
+  //  - Decomposition changes color (dark hair fades, light hair darkens)
+  //  - Human error in reporting/observation
+  // Score 0 but don't penalize — let other signals decide.
+  // Exception: gray vs non-gray on a young person would be caught by age mismatch instead.
+  return { score: 0, match: 'could_have_changed' }
 }
 
 function scoreEyes(a: ParsedCase, b: ParsedCase): SignalResult {
@@ -1000,7 +1010,17 @@ function scoreMatch(missing: ParsedCase, unidentified: ParsedCase): {
   }
 
   // Apply body state decomposition weighting
-  const bodyState = unidentified.bodyState
+  // If body state is unknown but time gap is large, infer minimum decomposition.
+  // 20+ years with unknown state → at least advanced decomposition
+  // 10+ years with unknown state → at least moderate decomposition
+  // This prevents unknown-state records from getting full soft-tissue signal credit
+  // when the time gap makes intact preservation implausible.
+  let bodyState = unidentified.bodyState
+  if (bodyState === 'unknown' && missing.year && unidentified.year) {
+    const gapYears = unidentified.year - missing.year
+    if (gapYears >= 20) bodyState = 'advanced'
+    else if (gapYears >= 10) bodyState = 'moderate'
+  }
   const w = DECOMP_WEIGHTS[bodyState]
   const decompNote = DECOMP_NOTES[bodyState]
 
