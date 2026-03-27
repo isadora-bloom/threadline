@@ -261,7 +261,15 @@ const UNIDENTIFIED_PROJECTIONS = [
   'createdDateTime',
 ]
 
-async function searchMissing(skip: number, take: number): Promise<SearchResponse<NamusMissingSearchResult>> {
+async function searchMissing(skip: number, take: number, stateFilter?: string): Promise<SearchResponse<NamusMissingSearchResult>> {
+  const predicates: unknown[] = []
+  if (stateFilter) {
+    predicates.push({
+      field: 'stateOfLastContact',
+      operator: 'IsIn',
+      values: [stateFilter],
+    })
+  }
   return fetchWithRetry<SearchResponse<NamusMissingSearchResult>>(
     `${NAMUS_BASE}/api/CaseSets/NamUs/MissingPersons/Search`,
     {
@@ -271,13 +279,21 @@ async function searchMissing(skip: number, take: number): Promise<SearchResponse
         take,
         skip,
         projections: MISSING_PROJECTIONS,
-        predicates: [],
+        predicates,
       }),
     }
   )
 }
 
-async function searchUnidentified(skip: number, take: number): Promise<SearchResponse<NamusUnidentifiedSearchResult>> {
+async function searchUnidentified(skip: number, take: number, stateFilter?: string): Promise<SearchResponse<NamusUnidentifiedSearchResult>> {
+  const predicates: unknown[] = []
+  if (stateFilter) {
+    predicates.push({
+      field: 'stateOfRecovery',
+      operator: 'IsIn',
+      values: [stateFilter],
+    })
+  }
   return fetchWithRetry<SearchResponse<NamusUnidentifiedSearchResult>>(
     `${NAMUS_BASE}/api/CaseSets/NamUs/UnidentifiedPersons/Search`,
     {
@@ -287,7 +303,7 @@ async function searchUnidentified(skip: number, take: number): Promise<SearchRes
         take,
         skip,
         projections: UNIDENTIFIED_PROJECTIONS,
-        predicates: [],
+        predicates,
       }),
     }
   )
@@ -458,173 +474,141 @@ async function upsertBatch(
 
 // ─── Main Scrape Functions ──────────────────────────────────────────────────
 
-async function scrapeMissing(supabase: SupabaseClient, sourceId: string): Promise<number> {
-  console.log('\n[MISSING PERSONS] Starting NamUs missing persons scrape...')
+// US states + territories for partitioned scraping
+const US_STATES = [
+  'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
+  'Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
+  'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan',
+  'Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire',
+  'New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio',
+  'Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota',
+  'Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia',
+  'Wisconsin','Wyoming','District of Columbia','Puerto Rico','Guam','US Virgin Islands',
+  'American Samoa',
+]
 
-  // Get total count first
-  const initial = await searchMissing(0, 0)
+async function scrapePartitioned(
+  supabase: SupabaseClient,
+  sourceId: string,
+  searchFn: (skip: number, take: number, state?: string) => Promise<SearchResponse<unknown>>,
+  transformFn: (record: never, sourceId: string) => ImportRecord,
+  label: string,
+): Promise<number> {
+  console.log(`\n[${label}] Starting NamUs ${label.toLowerCase()} scrape...`)
+
+  // Check total first
+  const initial = await searchFn(0, 0)
   const totalCount = initial.count
   console.log(`  Total records in NamUs: ${totalCount.toLocaleString()}`)
 
-  let allRecords: ImportRecord[] = []
-  let page = 0
-  let fetchedSoFar = 0
-  let totalInserted = 0
-  let totalUpdated = 0
-  let totalUnchanged = 0
-  let totalErrors = 0
+  const needsPartitioning = totalCount > 9500
+  if (needsPartitioning) {
+    console.log(`  Total exceeds 9,500 — partitioning by state to avoid API limit`)
+  }
 
-  while (fetchedSoFar < totalCount) {
-    const skip = page * PAGE_SIZE
+  let grandTotal = 0
+  let grandInserted = 0
+  let grandUpdated = 0
+  let grandUnchanged = 0
+  let grandErrors = 0
 
-    try {
-      const response = await searchMissing(skip, PAGE_SIZE)
+  const partitions = needsPartitioning ? US_STATES : [undefined] // undefined = no filter
 
-      if (!response.results || response.results.length === 0) {
-        console.log(`  Page ${page}: no more results. Done.`)
-        break
+  for (const state of partitions) {
+    if (state) {
+      process.stdout.write(`  [${state}] `)
+    }
+
+    let page = 0
+    let fetchedSoFar = 0
+    let partitionErrors = 0
+
+    while (true) {
+      const skip = page * PAGE_SIZE
+
+      try {
+        const response = await searchFn(skip, PAGE_SIZE, state)
+
+        if (!response.results || response.results.length === 0) {
+          break
+        }
+
+        if (page === 0 && state) {
+          process.stdout.write(`${response.count} records... `)
+        }
+
+        const records = response.results.map(r => transformFn(r as never, sourceId))
+        fetchedSoFar += response.results.length
+
+        const stats = await upsertBatch(supabase, records)
+        grandInserted += stats.inserted
+        grandUpdated += stats.updated
+        grandUnchanged += stats.unchanged
+        grandErrors += stats.errors
+
+        if (!state && fetchedSoFar % 100 === 0) {
+          console.log(
+            `  Progress: ${fetchedSoFar.toLocaleString()}/${totalCount.toLocaleString()} fetched` +
+            ` | +${stats.inserted} new, ~${stats.updated} updated, =${stats.unchanged} unchanged`
+          )
+        }
+
+        if (fetchedSoFar >= (response.count ?? Infinity)) break
+
+        page++
+        await sleep(DELAY_MS)
+      } catch (err) {
+        partitionErrors++
+        grandErrors++
+        if (partitionErrors > 3) {
+          console.log(`  ERROR: ${(err as Error).message} — skipping rest of ${state ?? 'partition'}`)
+          break
+        }
+        page++
+        await sleep(DELAY_MS * 3)
       }
+    }
 
-      const records = response.results.map(r => transformMissingRecord(r, sourceId))
-      allRecords.push(...records)
-      fetchedSoFar += response.results.length
-
-      // Upsert every PAGE_SIZE records
-      const stats = await upsertBatch(supabase, records)
-      totalInserted += stats.inserted
-      totalUpdated += stats.updated
-      totalUnchanged += stats.unchanged
-      totalErrors += stats.errors
-
-      // Progress log every 100 records
-      if (fetchedSoFar % 100 === 0 || fetchedSoFar >= totalCount) {
-        console.log(
-          `  Progress: ${fetchedSoFar.toLocaleString()}/${totalCount.toLocaleString()} fetched` +
-          ` | +${stats.inserted} new, ~${stats.updated} updated, =${stats.unchanged} unchanged`
-        )
-      }
-
-      page++
-      await sleep(DELAY_MS)
-    } catch (err) {
-      console.error(`  ERROR on page ${page} (skip=${skip}): ${(err as Error).message}`)
-      totalErrors++
-
-      // Save progress checkpoint
-      if (allRecords.length > 0) {
-        const checkpointPath = join(DATA_DIR, 'namus-missing-checkpoint.json')
-        writeFileSync(checkpointPath, JSON.stringify({
-          lastPage: page,
-          lastSkip: skip,
-          fetchedSoFar,
-          timestamp: new Date().toISOString(),
-        }, null, 2))
-        console.log(`  Checkpoint saved to ${checkpointPath}`)
-      }
-
-      // If many consecutive errors, stop
-      if (totalErrors > 10) {
-        console.error('  Too many errors. Stopping missing persons scrape.')
-        break
-      }
-
-      page++
-      await sleep(DELAY_MS * 3)
+    grandTotal += fetchedSoFar
+    if (state) {
+      console.log(`${fetchedSoFar} fetched`)
     }
   }
 
-  console.log(`\n  [MISSING PERSONS] Summary:`)
-  console.log(`    Fetched: ${fetchedSoFar.toLocaleString()} records`)
-  console.log(`    Inserted: ${totalInserted.toLocaleString()}`)
-  console.log(`    Updated: ${totalUpdated.toLocaleString()}`)
-  console.log(`    Unchanged: ${totalUnchanged.toLocaleString()}`)
-  console.log(`    Errors: ${totalErrors}`)
+  console.log(`\n  [${label}] Summary:`)
+  console.log(`    Fetched: ${grandTotal.toLocaleString()} records`)
+  console.log(`    Inserted: ${grandInserted.toLocaleString()}`)
+  console.log(`    Updated: ${grandUpdated.toLocaleString()}`)
+  console.log(`    Unchanged: ${grandUnchanged.toLocaleString()}`)
+  console.log(`    Errors: ${grandErrors}`)
 
-  return fetchedSoFar
+  // Update source record
+  await supabase.from('import_sources').update({
+    total_records: grandTotal,
+    last_import_at: new Date().toISOString(),
+  }).eq('id', sourceId)
+
+  return grandTotal
+}
+
+async function scrapeMissing(supabase: SupabaseClient, sourceId: string): Promise<number> {
+  return scrapePartitioned(
+    supabase,
+    sourceId,
+    searchMissing as (skip: number, take: number, state?: string) => Promise<SearchResponse<unknown>>,
+    transformMissingRecord as (record: never, sourceId: string) => ImportRecord,
+    'MISSING PERSONS',
+  )
 }
 
 async function scrapeUnidentified(supabase: SupabaseClient, sourceId: string): Promise<number> {
-  console.log('\n[UNIDENTIFIED REMAINS] Starting NamUs unidentified persons scrape...')
-
-  // Get total count first
-  const initial = await searchUnidentified(0, 0)
-  const totalCount = initial.count
-  console.log(`  Total records in NamUs: ${totalCount.toLocaleString()}`)
-
-  let allRecords: ImportRecord[] = []
-  let page = 0
-  let fetchedSoFar = 0
-  let totalInserted = 0
-  let totalUpdated = 0
-  let totalUnchanged = 0
-  let totalErrors = 0
-
-  while (fetchedSoFar < totalCount) {
-    const skip = page * PAGE_SIZE
-
-    try {
-      const response = await searchUnidentified(skip, PAGE_SIZE)
-
-      if (!response.results || response.results.length === 0) {
-        console.log(`  Page ${page}: no more results. Done.`)
-        break
-      }
-
-      const records = response.results.map(r => transformUnidentifiedRecord(r, sourceId))
-      allRecords.push(...records)
-      fetchedSoFar += response.results.length
-
-      // Upsert every PAGE_SIZE records
-      const stats = await upsertBatch(supabase, records)
-      totalInserted += stats.inserted
-      totalUpdated += stats.updated
-      totalUnchanged += stats.unchanged
-      totalErrors += stats.errors
-
-      // Progress log every 100 records
-      if (fetchedSoFar % 100 === 0 || fetchedSoFar >= totalCount) {
-        console.log(
-          `  Progress: ${fetchedSoFar.toLocaleString()}/${totalCount.toLocaleString()} fetched` +
-          ` | +${stats.inserted} new, ~${stats.updated} updated, =${stats.unchanged} unchanged`
-        )
-      }
-
-      page++
-      await sleep(DELAY_MS)
-    } catch (err) {
-      console.error(`  ERROR on page ${page} (skip=${skip}): ${(err as Error).message}`)
-      totalErrors++
-
-      // Save progress checkpoint
-      if (allRecords.length > 0) {
-        const checkpointPath = join(DATA_DIR, 'namus-unidentified-checkpoint.json')
-        writeFileSync(checkpointPath, JSON.stringify({
-          lastPage: page,
-          lastSkip: skip,
-          fetchedSoFar,
-          timestamp: new Date().toISOString(),
-        }, null, 2))
-        console.log(`  Checkpoint saved to ${checkpointPath}`)
-      }
-
-      if (totalErrors > 10) {
-        console.error('  Too many errors. Stopping unidentified persons scrape.')
-        break
-      }
-
-      page++
-      await sleep(DELAY_MS * 3)
-    }
-  }
-
-  console.log(`\n  [UNIDENTIFIED REMAINS] Summary:`)
-  console.log(`    Fetched: ${fetchedSoFar.toLocaleString()} records`)
-  console.log(`    Inserted: ${totalInserted.toLocaleString()}`)
-  console.log(`    Updated: ${totalUpdated.toLocaleString()}`)
-  console.log(`    Unchanged: ${totalUnchanged.toLocaleString()}`)
-  console.log(`    Errors: ${totalErrors}`)
-
-  return fetchedSoFar
+  return scrapePartitioned(
+    supabase,
+    sourceId,
+    searchUnidentified as (skip: number, take: number, state?: string) => Promise<SearchResponse<unknown>>,
+    transformUnidentifiedRecord as (record: never, sourceId: string) => ImportRecord,
+    'UNIDENTIFIED REMAINS',
+  )
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
