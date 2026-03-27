@@ -221,7 +221,7 @@ async function fetchWithRetry<T>(
 
 const HEADERS = {
   'Content-Type': 'application/json',
-  'User-Agent': 'Threadline Case Intelligence Platform — public interest research (threadline.app)',
+  'User-Agent': 'Threadline Case Intelligence Platform - public interest research (threadline.app)',
 }
 
 const MISSING_PROJECTIONS = [
