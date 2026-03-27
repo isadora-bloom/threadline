@@ -111,8 +111,7 @@ export function Sidebar() {
 
   const mainLinks = [
     { href: '/lookup', label: 'Case Lookup', icon: Fingerprint },
-    { href: '/intelligence', label: 'Intelligence', icon: Radar, badge: queueCount },
-    { href: '/intelligence/analysis', label: 'Analysis', icon: Brain },
+    { href: '/intelligence', label: 'Intelligence', icon: Brain },
     { href: '/registry', label: 'Registry', icon: Search },
     { href: '/my-watchlist', label: 'My Watchlist', icon: Star },
     { href: '/needing-attention', label: 'Needs You', icon: Flame },

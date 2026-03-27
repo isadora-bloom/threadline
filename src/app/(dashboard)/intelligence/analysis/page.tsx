@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -14,11 +14,12 @@ import { SocialNetworkGraph } from '@/components/patterns/SocialNetworkGraph'
 import { DoeMatchView } from '@/components/patterns/DoeMatchView'
 import dynamic from 'next/dynamic'
 import { OffenderView } from '@/components/patterns/OffenderView'
-import Link from 'next/link'
+import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads'
+import { ResearchTaskList } from '@/components/research/ResearchTaskList'
 
 const GeoView = dynamic(
   () => import('@/components/patterns/GeoView').then(m => ({ default: m.GeoView })),
-  { ssr: false, loading: () => <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Loading map…</div> }
+  { ssr: false, loading: () => <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Loading map...</div> }
 )
 
 import {
@@ -34,37 +35,33 @@ import {
   GitMerge,
   Globe,
   ShieldAlert,
-  ChevronLeft,
+  Sparkles,
+  Microscope,
+  Clock,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
+import { formatDate } from '@/lib/utils'
 
-/**
- * Global Analysis Page
- *
- * This page reuses the existing pattern analysis components but at the global level.
- * It auto-discovers system cases (Doe Network, NamUs imports) and passes their IDs
- * to the components that already know how to work with them.
- *
- * The key insight: DoeMatchView and GeoView already find the Doe Network case internally.
- * OffenderView works per-case. PatternFlagList/LinkScoreList work per-case.
- * So we find the primary "system" case and use it as the entry point.
- */
-export default function GlobalAnalysisPage() {
+export default function IntelligencePage() {
   const supabase = createClient()
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
   const [activeTab, setActiveTab] = useState('doe-match')
   const [isRunningAnalysis, setIsRunningAnalysis] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [alertsDismissed, setAlertsDismissed] = useState(false)
 
-  // Find system cases — the cases holding imported data
+  // Find system cases
   const { data: systemCases, isLoading: casesLoading } = useQuery({
     queryKey: ['system-cases'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return []
 
-      // Get all cases the user has access to
       const { data: roles } = await supabase
         .from('case_user_roles')
         .select('case_id, role')
@@ -83,9 +80,6 @@ export default function GlobalAnalysisPage() {
     },
   })
 
-  // Find the primary case for analysis — the one with the most data
-  // DoeMatchView internally looks for "Doe Network" in the title,
-  // so any case works as an entry point for DOE matching.
   const primaryCase = systemCases?.find(c =>
     c.title?.toLowerCase().includes('doe') ||
     c.title?.toLowerCase().includes('namus') ||
@@ -94,25 +88,44 @@ export default function GlobalAnalysisPage() {
 
   const caseId = primaryCase?.id
 
-  // Summary stats from intelligence queue (global, not per-case)
-  const { data: globalStats } = useQuery({
-    queryKey: ['global-analysis-stats'],
+  // Stats from the actual matcher tables (not the rule-based queue)
+  const { data: stats } = useQuery({
+    queryKey: ['intelligence-stats'],
     queryFn: async () => {
-      const [queueNew, queueActioned, connections, doeMatches, offenderOverlaps] = await Promise.all([
-        supabase.from('intelligence_queue').select('id', { count: 'exact', head: true }).eq('status', 'new'),
-        supabase.from('intelligence_queue').select('id', { count: 'exact', head: true }).eq('status', 'actioned'),
-        supabase.from('global_connections').select('id', { count: 'exact', head: true }).gte('composite_score', 41),
-        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }).gte('composite_score', 30),
+      const [doeAll, doeStrong, offenders, stalledCases, importTotal, importProcessed, settingsRes] = await Promise.all([
+        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }),
+        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }).in('grade', ['strong', 'very_strong']),
         supabase.from('offender_case_overlaps').select('id', { count: 'exact', head: true }).gte('composite_score', 65),
+        supabase.from('doe_stall_flags').select('id', { count: 'exact', head: true }),
+        supabase.from('import_records').select('id', { count: 'exact', head: true }),
+        supabase.from('import_records').select('id', { count: 'exact', head: true }).eq('ai_processed', true),
+        caseId ? supabase.from('case_pattern_settings').select('updated_at').eq('case_id', caseId).single() : Promise.resolve({ data: null }),
       ])
-
       return {
-        queue_new: queueNew.count ?? 0,
-        queue_actioned: queueActioned.count ?? 0,
-        global_connections: connections.count ?? 0,
-        doe_matches: doeMatches.count ?? 0,
-        offender_overlaps: offenderOverlaps.count ?? 0,
+        doe_total: doeAll.count ?? 0,
+        doe_strong: doeStrong.count ?? 0,
+        offender_overlaps: offenders.count ?? 0,
+        stalled_cases: stalledCases.count ?? 0,
+        registry_total: importTotal.count ?? 0,
+        registry_processed: importProcessed.count ?? 0,
+        last_analyzed: settingsRes.data?.updated_at ?? null,
       }
+    },
+    enabled: !!caseId,
+  })
+
+  // Fetch top stalled case alerts for the banner
+  const { data: stalledAlerts } = useQuery({
+    queryKey: ['stalled-alerts'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('intelligence_queue')
+        .select('id, title, summary, priority_score')
+        .eq('queue_type', 'stalled_case')
+        .eq('status', 'new')
+        .order('priority_score', { ascending: false })
+        .limit(5)
+      return data ?? []
     },
   })
 
@@ -132,7 +145,7 @@ export default function GlobalAnalysisPage() {
         title: 'Analysis complete',
         description: `${data.linksScored} links scored, ${data.flagsGenerated} flags generated.`,
       })
-      queryClient.invalidateQueries({ queryKey: ['global-analysis-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['intelligence-stats'] })
     } catch (err) {
       toast({
         variant: 'destructive',
@@ -149,7 +162,7 @@ export default function GlobalAnalysisPage() {
       <div className="p-6 max-w-6xl mx-auto">
         <div className="flex items-center gap-2 mb-4">
           <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-          <span className="text-sm text-slate-500">Loading analysis...</span>
+          <span className="text-sm text-slate-500">Loading intelligence...</span>
         </div>
       </div>
     )
@@ -160,10 +173,9 @@ export default function GlobalAnalysisPage() {
       <div className="p-6 max-w-6xl mx-auto">
         <div className="text-center py-16 border-2 border-dashed border-slate-200 rounded-lg">
           <Brain className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-          <h3 className="font-semibold text-slate-700 mb-1">No cases available for analysis</h3>
+          <h3 className="font-semibold text-slate-700 mb-1">No data available for analysis</h3>
           <p className="text-sm text-slate-400 max-w-md mx-auto">
-            Import data from NamUs or Doe Network, create a case, and run the analysis pipeline
-            to see pattern intelligence here.
+            Import data from NamUs or Doe Network, then run the analysis pipeline.
           </p>
         </div>
       </div>
@@ -171,20 +183,17 @@ export default function GlobalAnalysisPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-6 max-w-6xl mx-auto space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Link href="/intelligence" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-2">
-            <ChevronLeft className="h-4 w-4" />
-            Intelligence
-          </Link>
           <div className="flex items-center gap-2 mb-1">
             <Brain className="h-5 w-5 text-indigo-600" />
-            <h1 className="text-xl font-bold text-slate-900">Global Analysis</h1>
+            <h1 className="text-xl font-bold text-slate-900">Intelligence</h1>
           </div>
           <p className="text-sm text-slate-500">
-            Cross-case pattern analysis across all imported data. DOE matching, offender overlaps, corridor analysis, geographic clustering.
+            {(stats?.registry_total ?? 0).toLocaleString()} records across NamUs and Doe Network.
+            {stats?.last_analyzed && ` Last analyzed ${formatDate(stats.last_analyzed)}.`}
           </p>
         </div>
 
@@ -202,53 +211,107 @@ export default function GlobalAnalysisPage() {
         </Button>
       </div>
 
-      {/* Epistemic notice */}
-      <div className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
-        <AlertTriangle className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-slate-500 leading-relaxed">
-          All pattern analysis is automated and surfaced for human review only.
-          Match scores compare statistical similarity — they do not confirm identity.
-          Confirmation requires forensic verification (dental, DNA, fingerprints).
-        </p>
-      </div>
+      {/* Stalled case alerts */}
+      {stalledAlerts && stalledAlerts.length > 0 && !alertsDismissed && (
+        <div className="border border-amber-200 bg-amber-50 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-amber-600" />
+              <span className="text-sm font-semibold text-amber-800">
+                {stats?.stalled_cases ?? 0} stalled cases flagged
+              </span>
+            </div>
+            <Button variant="ghost" size="sm" className="text-xs text-amber-600 h-6" onClick={() => setAlertsDismissed(true)}>
+              Dismiss
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            {stalledAlerts.slice(0, 3).map(alert => (
+              <p key={alert.id} className="text-xs text-amber-700 leading-relaxed">
+                {alert.summary}
+              </p>
+            ))}
+            {stalledAlerts.length > 3 && (
+              <p className="text-xs text-amber-500">+{stalledAlerts.length - 3} more</p>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* Summary */}
+      {/* Summary stats */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Card>
           <CardContent className="p-4">
             <div className="text-sm font-medium text-slate-500">DOE Matches</div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{(globalStats?.doe_matches ?? 0).toLocaleString()}</div>
+            <div className="text-2xl font-bold text-slate-900 mt-1">{(stats?.doe_total ?? 0).toLocaleString()}</div>
+          </CardContent>
+        </Card>
+        <Card className={stats?.doe_strong ? 'border-indigo-200 bg-indigo-50' : ''}>
+          <CardContent className="p-4">
+            <div className="text-sm font-medium text-indigo-600">Strong+</div>
+            <div className="text-2xl font-bold text-indigo-800 mt-1">{(stats?.doe_strong ?? 0).toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm font-medium text-slate-500">Offender Overlaps</div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{(globalStats?.offender_overlaps ?? 0).toLocaleString()}</div>
+            <div className="text-2xl font-bold text-slate-900 mt-1">{(stats?.offender_overlaps ?? 0).toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="text-sm font-medium text-slate-500">Global Connections</div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{globalStats?.global_connections ?? 0}</div>
-          </CardContent>
-        </Card>
-        <Card className={globalStats?.queue_new ? 'border-amber-200 bg-amber-50' : ''}>
-          <CardContent className="p-4">
-            <div className="text-sm font-medium text-amber-700">Needs Review</div>
-            <div className="text-2xl font-bold text-amber-800 mt-1">{globalStats?.queue_new ?? 0}</div>
+            <div className="text-sm font-medium text-slate-500">Stalled Cases</div>
+            <div className="text-2xl font-bold text-slate-900 mt-1">{stats?.stalled_cases ?? 0}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="text-sm font-medium text-slate-500">Actioned</div>
-            <div className="text-2xl font-bold text-green-700 mt-1">{globalStats?.queue_actioned ?? 0}</div>
+            <div className="text-sm font-medium text-slate-500">Registry</div>
+            <div className="text-2xl font-bold text-slate-900 mt-1">{(stats?.registry_total ?? 0).toLocaleString()}</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs — reusing existing components with the system case ID */}
+      {/* Epistemic notice */}
+      <div className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+        <AlertTriangle className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-slate-500 leading-relaxed">
+          Match scores compare physical descriptions statistically. A high score means shared characteristics —
+          it does not mean the same person. Confirmation requires official record comparison, dental or DNA matching,
+          or other forensic verification.
+        </p>
+      </div>
+
+      {/* Help banner */}
+      <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <button
+          onClick={() => setHelpOpen(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-sm text-slate-600"
+        >
+          <span className="flex items-center gap-2">
+            <HelpCircle className="h-4 w-4 text-slate-400" />
+            <span className="font-medium">What do these tabs do?</span>
+          </span>
+          {helpOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+        </button>
+        {helpOpen && (
+          <div className="px-4 py-3 bg-white border-t border-slate-200 text-xs text-slate-600 space-y-1.5">
+            <p><span className="font-semibold text-slate-700">Remains Match:</span> Cross-references missing person submissions against unidentified remains records. Full 16-signal scoring with decomposition weighting.</p>
+            <p><span className="font-semibold text-slate-700">Known Offenders:</span> Pattern overlap between cases and convicted serial offenders. Statistical only — not an accusation.</p>
+            <p><span className="font-semibold text-slate-700">Map View:</span> Geographic clustering of locations mentioned across submissions.</p>
+            <p><span className="font-semibold text-slate-700">Travel Routes:</span> Submissions that mention known travel corridors or interstates.</p>
+            <p><span className="font-semibold text-slate-700">Flags:</span> Automated signals surfaced from comparing submissions to each other.</p>
+            <p><span className="font-semibold text-slate-700">Connections:</span> Pairwise similarity between submissions.</p>
+            <p><span className="font-semibold text-slate-700">Network:</span> Visual web of people and entities mentioned across submissions.</p>
+            <p><span className="font-semibold text-slate-700">Threads:</span> AI-drafted investigative questions and leads.</p>
+            <p><span className="font-semibold text-slate-700">Research:</span> Manual and AI-assisted open-source research tasks.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full max-w-4xl grid-cols-7">
+        <TabsList className="grid w-full max-w-5xl grid-cols-9">
           <TabsTrigger value="doe-match" className="text-xs">
             <GitMerge className="h-3.5 w-3.5 mr-1" />
             Remains Match
@@ -276,6 +339,14 @@ export default function GlobalAnalysisPage() {
           <TabsTrigger value="network" className="text-xs">
             <Users className="h-3.5 w-3.5 mr-1" />
             Network
+          </TabsTrigger>
+          <TabsTrigger value="threads" className="text-xs">
+            <Sparkles className="h-3.5 w-3.5 mr-1" />
+            Threads
+          </TabsTrigger>
+          <TabsTrigger value="research" className="text-xs">
+            <Microscope className="h-3.5 w-3.5 mr-1" />
+            Research
           </TabsTrigger>
         </TabsList>
 
@@ -305,6 +376,14 @@ export default function GlobalAnalysisPage() {
 
         <TabsContent value="network" className="mt-4">
           <SocialNetworkGraph caseId={caseId} />
+        </TabsContent>
+
+        <TabsContent value="threads" className="mt-4">
+          <InvestigativeThreads caseId={caseId} canGenerate={true} />
+        </TabsContent>
+
+        <TabsContent value="research" className="mt-4">
+          <ResearchTaskList caseId={caseId} canManage={true} />
         </TabsContent>
       </Tabs>
     </div>
