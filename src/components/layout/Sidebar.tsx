@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useParams, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Briefcase, LogOut, Radar, Users, Search, Flame, BookOpen, Brain, Star } from 'lucide-react'
+import { Briefcase, LogOut, Radar, Users, Search, Flame, BookOpen, Brain, Star, Fingerprint } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -110,6 +110,7 @@ export function Sidebar() {
   })
 
   const mainLinks = [
+    { href: '/lookup', label: 'Case Lookup', icon: Fingerprint },
     { href: '/intelligence', label: 'Intelligence', icon: Radar, badge: queueCount },
     { href: '/intelligence/analysis', label: 'Analysis', icon: Brain },
     { href: '/registry', label: 'Registry', icon: Search },
