@@ -238,10 +238,13 @@ async function main() {
     console.log(`\n--- ${type === 'MP' ? 'MISSING PERSONS' : 'UNIDENTIFIED REMAINS'} ---`)
 
     // Fetch submissions
+    // Only fetch un-enriched submissions (no Height: line yet)
+    // Use not.ilike to filter at SQL level instead of skipping in the loop
     let query = supabase
       .from('submissions')
       .select('id, raw_text, notes')
       .eq('case_id', caseId)
+      .not('raw_text', 'ilike', '%Height:%')
       .order('created_at', { ascending: true })
       .limit(LIMIT)
 
@@ -251,6 +254,7 @@ async function main() {
         .select('id, raw_text, notes')
         .eq('case_id', caseId)
         .in('id', submissionIds)
+        .not('raw_text', 'ilike', '%Height:%')
         .limit(LIMIT)
     }
 
