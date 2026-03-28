@@ -321,6 +321,59 @@ async function main() {
         totalSkipped++
       }
 
+      // Update import_record with case status, classification, and circumstances
+      const namusId = `${type}${namus.number}`
+      const importUpdate: Record<string, unknown> = {}
+
+      // Case resolved status
+      if (detail.caseIsResolved === true) {
+        importUpdate.case_status = 'resolved_other'
+      }
+
+      // Classification from circumstances text or Doe Network field
+      const circText = type === 'MP'
+        ? (detail.circumstances as Record<string, unknown>)?.circumstancesOfDisappearance as string | undefined
+        : (detail.circumstances as Record<string, unknown>)?.circumstancesOfRecovery as string | undefined
+
+      // Extract classification from Doe Network records
+      const classMatch = sub.raw_text.match(/Case Classification:\s*(.+)/m)
+      if (classMatch) {
+        importUpdate.classification = classMatch[1].trim()
+      }
+
+      // Circumstances summary (first 200 chars)
+      if (circText) {
+        importUpdate.circumstances_summary = circText.length > 200
+          ? circText.slice(0, 197) + '...'
+          : circText
+      }
+
+      // Key flags from circumstances
+      const flags: string[] = []
+      const circLower = (circText ?? '').toLowerCase()
+      if (circLower.includes('international') || circLower.includes('mexico') || circLower.includes('canada') || circLower.includes('abroad') || circLower.includes('overseas') || circLower.includes('country')) flags.push('international')
+      if (circLower.includes('abduct') && (circLower.includes('family') || circLower.includes('father') || circLower.includes('mother') || circLower.includes('parent') || circLower.includes('custod'))) flags.push('family_abduction')
+      if (circLower.includes('foul play') || circLower.includes('homicide') || circLower.includes('murder') || circLower.includes('killed')) flags.push('foul_play_suspected')
+      if (circLower.includes('sex offend') || circLower.includes('predator') || circLower.includes('registered offend')) flags.push('sex_offender_involvement')
+
+      // Check age for child flag
+      const ageMatch = sub.raw_text.match(/Age:\s*(\d+)/m)
+      if (ageMatch && parseInt(ageMatch[1]) < 13) flags.push('child')
+
+      // DNA/dental from enriched text
+      if (enrichedText.includes('DNA')) flags.push('dna_available')
+      if (enrichedText.includes('Dental') || enrichedText.includes('Dentals')) flags.push('dental_available')
+
+      if (flags.length > 0) importUpdate.key_flags = flags
+      if (detail.caseIsResolved !== undefined) importUpdate.case_status = detail.caseIsResolved ? 'resolved_other' : 'open'
+
+      if (Object.keys(importUpdate).length > 0) {
+        await supabase
+          .from('import_records')
+          .update(importUpdate)
+          .eq('external_id', namusId)
+      }
+
       if ((i + 1) % 50 === 0) {
         console.log(`  [${i + 1}/${subs.length}] ${totalEnriched} enriched, ${totalSkipped} skipped, ${totalErrors} errors`)
       }
