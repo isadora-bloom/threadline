@@ -136,6 +136,7 @@ async function main() {
       .from('import_records')
       .select('id, external_id, submission_id, age_text, record_type')
       .not('submission_id', 'is', null)
+      .is('circumstances_summary', null)
       .range(offset, offset + BATCH - 1)
       .order('created_at', { ascending: true })
 

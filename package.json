@@ -19,6 +19,7 @@
     "pipeline:match": "npx tsx scripts/rule-based-match.ts",
     "pipeline:extract": "npx tsx scripts/ai-targeted-extract.ts",
     "pipeline:patterns": "npx tsx scripts/ai-pattern-analysis.ts",
+    "scrape:charley": "npx tsx scripts/scrape-charley-project.ts",
     "pipeline:all": "npx tsx scripts/rule-based-match.ts && npx tsx scripts/ai-targeted-extract.ts && npx tsx scripts/ai-pattern-analysis.ts"
   },
   "dependencies": {
