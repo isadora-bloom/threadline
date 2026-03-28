@@ -1796,7 +1796,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
 
   const supabase = createClient()
 
-  // Find Doe Network import cases the user can access
+  // Find all import cases (Doe Network + NamUs) the user can access
   const { data: doeCases } = useQuery({
     queryKey: ['doe-case-ids'],
     queryFn: async () => {
@@ -1810,18 +1810,25 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         .from('cases')
         .select('id, title')
         .in('id', caseIds)
-        .ilike('title', '%Doe Network%')
+        .or('title.ilike.%Doe Network%,title.ilike.%NamUs%')
 
       const all = (cases ?? []) as Array<{ id: string; title: string }>
+
+      // Prefer NamUs missing case (has the most data), fall back to Doe Network
+      const namusMissing = all.find(c => c.title.includes('NamUs') && c.title.includes('Missing'))?.id
+      const doeMissing = all.find(c => c.title.includes('Doe Network') && c.title.includes('Missing'))?.id
+      const namusUnidentified = all.find(c => c.title.includes('NamUs') && c.title.includes('Unidentified'))?.id
+      const doeUnidentified = all.find(c => c.title.includes('Doe Network') && c.title.includes('Unidentified'))?.id
+
       return {
-        missing:      all.find(c => c.title.includes('Missing Persons'))?.id ?? null,
-        unidentified: all.find(c => c.title.includes('Unidentified'))?.id ?? null,
+        missing:      namusMissing ?? doeMissing ?? null,
+        unidentified: namusUnidentified ?? doeUnidentified ?? null,
         all,
       }
     },
   })
 
-  // Always use the Missing Persons case ID for queries — caseId might be any Doe Network case
+  // Use the missing persons case with the most matches
   const effectiveCaseId = doeCases?.missing ?? caseId
 
   // Fetch match candidates
