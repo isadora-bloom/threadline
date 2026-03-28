@@ -142,14 +142,19 @@ async function main() {
     if (error) { console.error('Fetch error:', error.message); break }
     if (!records || records.length === 0) break
 
-    // Batch fetch the linked submissions
+    // Batch fetch the linked submissions in chunks of 50 (Supabase URL length limit)
     const subIds = records.map(r => r.submission_id).filter(Boolean) as string[]
-    const { data: subs } = await supabase
-      .from('submissions')
-      .select('id, raw_text')
-      .in('id', subIds)
-
-    const subMap = new Map((subs ?? []).map(s => [s.id, s.raw_text]))
+    const subMap = new Map<string, string>()
+    for (let si = 0; si < subIds.length; si += 50) {
+      const chunk = subIds.slice(si, si + 50)
+      const { data: subs } = await supabase
+        .from('submissions')
+        .select('id, raw_text')
+        .in('id', chunk)
+      for (const s of subs ?? []) {
+        subMap.set(s.id, s.raw_text)
+      }
+    }
 
     for (const record of records) {
       const text = subMap.get(record.submission_id) ?? ''
