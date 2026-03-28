@@ -237,34 +237,46 @@ async function main() {
   for (const { caseId, type } of namusCases) {
     console.log(`\n--- ${type === 'MP' ? 'MISSING PERSONS' : 'UNIDENTIFIED REMAINS'} ---`)
 
-    // Fetch submissions
-    // Only fetch un-enriched submissions (no Height: line yet)
-    // Use not.ilike to filter at SQL level instead of skipping in the loop
-    let query = supabase
-      .from('submissions')
-      .select('id, raw_text, notes')
-      .eq('case_id', caseId)
-      .not('raw_text', 'ilike', '%Height:%')
-      .order('created_at', { ascending: true })
-      .limit(LIMIT)
+    // Loop: fetch batches of 1000 un-enriched records until done or limit reached
+    let batchNum = 0
+    let caseEnriched = 0
 
-    if (submissionIds.length > 0) {
-      query = supabase
+    while (caseEnriched < LIMIT) {
+      batchNum++
+      const batchLimit = Math.min(1000, LIMIT - caseEnriched)
+
+      let query = supabase
         .from('submissions')
         .select('id, raw_text, notes')
         .eq('case_id', caseId)
-        .in('id', submissionIds)
         .not('raw_text', 'ilike', '%Height:%')
-        .limit(LIMIT)
-    }
+        .not('raw_text', 'ilike', '%Distinguishing Marks:%')
+        .order('created_at', { ascending: true })
+        .limit(batchLimit)
 
-    const { data: subs, error } = await query
-    if (error || !subs) {
-      console.error('  Fetch error:', error?.message)
-      continue
-    }
+      if (submissionIds.length > 0) {
+        query = supabase
+          .from('submissions')
+          .select('id, raw_text, notes')
+          .eq('case_id', caseId)
+          .in('id', submissionIds)
+          .not('raw_text', 'ilike', '%Height:%')
+          .not('raw_text', 'ilike', '%Distinguishing Marks:%')
+          .limit(batchLimit)
+      }
 
-    console.log(`  ${subs.length} submissions to process`)
+      const { data: subs, error } = await query
+      if (error || !subs) {
+        console.error('  Fetch error:', error?.message)
+        break
+      }
+
+      if (subs.length === 0) {
+        console.log(`  No more un-enriched submissions. Done.`)
+        break
+      }
+
+      console.log(`  Batch ${batchNum}: ${subs.length} submissions to process`)
 
     for (let i = 0; i < subs.length; i++) {
       const sub = subs[i]
@@ -315,7 +327,11 @@ async function main() {
 
       await sleep(DELAY_MS)
     }
-  }
+
+      caseEnriched += subs.length
+      console.log(`  Batch ${batchNum} done. Total enriched so far: ${totalEnriched}`)
+    } // end while loop
+  } // end for namusCases
 
   console.log('\n=== Summary ===')
   console.log(`Enriched: ${totalEnriched}`)
