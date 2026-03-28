@@ -168,6 +168,59 @@ export default async function RegistryProfilePage({
         </div>
       </div>
 
+      {/* The person — not the data */}
+      {(() => {
+        const circumstancesText = (circumstances?.detailed ?? circumstances?.brief) as string | undefined
+        const yearsMissing = record.date_missing
+          ? Math.floor((Date.now() - new Date(record.date_missing as string).getTime()) / (365.25 * 86400000))
+          : null
+        const yearsFound = record.date_found
+          ? Math.floor((Date.now() - new Date(record.date_found as string).getTime()) / (365.25 * 86400000))
+          : null
+
+        return (
+          <div className="rounded-lg border border-slate-200 bg-white p-5">
+            {isMissing ? (
+              <div className="space-y-2">
+                <p className="text-slate-800 leading-relaxed">
+                  <span className="font-semibold">{record.person_name}</span>
+                  {record.age_text && <> was <span className="font-medium">{record.age_text} years old</span></>}
+                  {record.city && record.state && <> in <span className="font-medium">{record.city}, {record.state}</span></>}
+                  {record.date_missing && <> when {record.person_name?.split(' ')[0] ?? 'they'} went missing on <span className="font-medium">{new Date(record.date_missing as string).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span></>}
+                  .{yearsMissing && yearsMissing > 0 && <> That was <span className="font-medium">{yearsMissing} years ago</span>.</>}
+                </p>
+                {circumstancesText && (
+                  <p className="text-sm text-slate-600 leading-relaxed">{circumstancesText}</p>
+                )}
+                {!circumstancesText && yearsMissing && yearsMissing > 5 && (
+                  <p className="text-sm text-slate-500 italic">
+                    Someone is still looking for {record.person_name?.split(' ')[0] ?? 'this person'}.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-slate-800 leading-relaxed">
+                  Unidentified {record.sex?.toLowerCase() ?? 'person'}
+                  {record.age_text && <>, estimated age <span className="font-medium">{record.age_text}</span></>}
+                  {record.city && record.state && <>, found in <span className="font-medium">{record.city}, {record.state}</span></>}
+                  {record.date_found && <> on <span className="font-medium">{new Date(record.date_found as string).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span></>}
+                  .{yearsFound && yearsFound > 0 && <> <span className="font-medium">{yearsFound} years</span> without a name.</>}
+                </p>
+                {circumstancesText && (
+                  <p className="text-sm text-slate-600 leading-relaxed">{circumstancesText}</p>
+                )}
+                {!circumstancesText && (
+                  <p className="text-sm text-slate-500 italic">
+                    Somebody knows who this person is.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* AI Extraction Notice */}
       {record.ai_processed && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
