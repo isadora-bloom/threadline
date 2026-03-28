@@ -3481,9 +3481,34 @@ export async function GET(req: NextRequest) {
     q = q.eq('ai_assessment->>verdict', aiVerdict)
   }
 
-  const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+  // Fetch extra rows to account for deduplication
+  const fetchSize = PAGE_SIZE * 3
+  const { data: rawData, count, error } = await q.range(page * fetchSize, (page + 1) * fetchSize - 1)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ matches: data, total: count, page })
+
+  // Deduplicate: same missing person matched to same unidentified person from different
+  // source cases (NamUs + Doe Network) produces duplicate rows. Keep highest-scoring version.
+  type MatchRow = Record<string, unknown>
+  const deduped = new Map<string, MatchRow>()
+  for (const row of (rawData ?? []) as MatchRow[]) {
+    const mName = ((row.missing_name as string) ?? '').toLowerCase().trim()
+    const uLoc  = ((row.unidentified_location as string) ?? '').toLowerCase().trim()
+    const uDate = (row.unidentified_date as string) ?? ''
+    const key   = `${mName}||${uLoc}||${uDate}`
+
+    const existing = deduped.get(key)
+    if (!existing || (row.composite_score as number) > (existing.composite_score as number)) {
+      deduped.set(key, row)
+    }
+  }
+
+  const matches = [...deduped.values()]
+    .sort((a, b) => (b.composite_score as number) - (a.composite_score as number))
+    .slice(0, PAGE_SIZE)
+
+  const dedupedTotal = count ? Math.round(count * (matches.length / Math.max(1, (rawData as unknown[])?.length ?? 1))) : matches.length
+
+  return NextResponse.json({ matches, total: dedupedTotal, page })
 }
 
 // ─── PATCH — review ──────────────────────────────────────────────────────────
