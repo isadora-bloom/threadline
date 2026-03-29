@@ -54,13 +54,49 @@ export default async function RegistryProfilePage({
   const solvability = extraction?.solvability_signals as Record<string, unknown> | undefined
   const investigatorNotes = extraction?.investigator_notes as string | undefined
 
-  // Fetch connections
+  // Fetch connections (rule-based)
   const { data: connections } = await supabase
     .from('global_connections')
     .select('*, record_a:import_records!global_connections_record_a_id_fkey(id, person_name, record_type, state, date_missing, date_found, sex, age_text), record_b:import_records!global_connections_record_b_id_fkey(id, person_name, record_type, state, date_missing, date_found, sex, age_text)')
     .or(`record_a_id.eq.${recordId},record_b_id.eq.${recordId}`)
     .order('composite_score', { ascending: false })
     .limit(20)
+
+  // Fetch DOE match candidates (the real 16-signal matches) via submission_id
+  const submissionId = record.submission_id as string | null
+  let doeMatches: Array<Record<string, unknown>> = []
+  let offenderOverlaps: Array<Record<string, unknown>> = []
+
+  if (submissionId) {
+    // Missing person → their matches against unidentified remains
+    if (isMissing) {
+      const { data: matches } = await supabase
+        .from('doe_match_candidates')
+        .select('*')
+        .eq('missing_submission_id', submissionId)
+        .order('composite_score', { ascending: false })
+        .limit(20)
+      doeMatches = (matches ?? []) as Array<Record<string, unknown>>
+    } else {
+      // Unidentified remains → who might they be
+      const { data: matches } = await supabase
+        .from('doe_match_candidates')
+        .select('*')
+        .eq('unidentified_submission_id', submissionId)
+        .order('composite_score', { ascending: false })
+        .limit(20)
+      doeMatches = (matches ?? []) as Array<Record<string, unknown>>
+    }
+
+    // Offender overlaps for this submission
+    const { data: overlaps } = await supabase
+      .from('offender_case_overlaps')
+      .select('*, offender:known_offenders(name, status, mo_keywords, victim_states)')
+      .eq('submission_id', submissionId)
+      .order('composite_score', { ascending: false })
+      .limit(10)
+    offenderOverlaps = (overlaps ?? []) as Array<Record<string, unknown>>
+  }
 
   // Fetch solvability
   const { data: solvabilityScore } = await supabase
@@ -451,6 +487,137 @@ export default async function RegistryProfilePage({
                           <ChevronLeft className="h-4 w-4 text-slate-400 rotate-180" />
                         </div>
                       </Link>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* DOE Match Candidates — the real 16-signal matches */}
+          {doeMatches.length > 0 && (
+            <Card className="border-indigo-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Link2 className="h-4 w-4 text-indigo-600" />
+                  {isMissing ? 'Possible Remains Matches' : 'Possible Identity Matches'} ({doeMatches.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-slate-500 mb-3">
+                  Scored on 16 signals including physical description, decomposition state, location, and temporal proximity. High scores mean shared characteristics — not confirmed identity.
+                </p>
+                <div className="space-y-2">
+                  {doeMatches.map((match) => {
+                    const score = match.composite_score as number
+                    const grade = match.grade as string
+                    const ai = match.ai_assessment as Record<string, unknown> | null
+                    const aiLevel = ai?.connection_level as number | undefined
+
+                    return (
+                      <div key={match.id as string} className="p-3 bg-slate-50 rounded-md">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <Badge className={`text-xs ${
+                              grade === 'very_strong' ? 'bg-indigo-100 text-indigo-800' :
+                              grade === 'strong' ? 'bg-blue-100 text-blue-800' :
+                              grade === 'notable' ? 'bg-amber-100 text-amber-800' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {grade} — {score}
+                            </Badge>
+                            {aiLevel && (
+                              <Badge variant="outline" className={`text-xs ${
+                                aiLevel >= 4 ? 'text-green-700 border-green-300' :
+                                aiLevel === 3 ? 'text-amber-700 border-amber-300' :
+                                'text-slate-500'
+                              }`}>
+                                AI: {aiLevel}/5
+                              </Badge>
+                            )}
+                          </div>
+                          <span className="text-xs text-slate-400">
+                            {isMissing
+                              ? (match.unidentified_location as string ?? 'Unknown location')
+                              : (match.missing_name as string ?? 'Unknown')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-slate-600">
+                          {isMissing ? (
+                            <>
+                              {match.unidentified_sex && <span>{match.unidentified_sex as string}</span>}
+                              {match.unidentified_age && <span>Age {match.unidentified_age as string}</span>}
+                              {match.unidentified_race && <span>{match.unidentified_race as string}</span>}
+                              {match.unidentified_date && <span>Found {match.unidentified_date as string}</span>}
+                            </>
+                          ) : (
+                            <>
+                              {match.missing_name && <span className="font-medium">{match.missing_name as string}</span>}
+                              {match.missing_sex && <span>{match.missing_sex as string}</span>}
+                              {match.missing_age && <span>Age {match.missing_age as string}</span>}
+                              {match.missing_date && <span>Missing {match.missing_date as string}</span>}
+                              {match.missing_location && <span>{match.missing_location as string}</span>}
+                            </>
+                          )}
+                        </div>
+                        {ai?.summary && (
+                          <p className="text-xs text-slate-500 mt-1.5 italic">{ai.summary as string}</p>
+                        )}
+                        {match.missing_marks && (match.missing_marks as string).length > 5 && (
+                          <p className="text-xs text-slate-500 mt-1">Marks: {(match.missing_marks as string).slice(0, 100)}</p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Offender Overlaps */}
+          {offenderOverlaps.length > 0 && (
+            <Card className="border-red-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-red-600" />
+                  Offender Overlaps ({offenderOverlaps.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-slate-500 mb-3">
+                  Statistical overlap with known serial offenders. Not an accusation — a signal for investigative review.
+                </p>
+                <div className="space-y-2">
+                  {offenderOverlaps.map((overlap) => {
+                    const offender = overlap.offender as Record<string, unknown> | null
+                    const score = overlap.composite_score as number
+                    const ai = overlap.ai_assessment as Record<string, unknown> | null
+
+                    return (
+                      <div key={`${overlap.offender_id}-${overlap.submission_id}`} className="p-3 bg-red-50 rounded-md">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-medium text-sm text-slate-900">
+                            {offender?.name as string ?? 'Unknown offender'}
+                          </span>
+                          <Badge className="text-xs bg-red-100 text-red-800">
+                            Score: {score}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-600">
+                          {offender?.status && <span>{offender.status as string}</span>}
+                          {offender?.victim_states && <span>Active in: {(offender.victim_states as string[]).slice(0, 3).join(', ')}</span>}
+                        </div>
+                        {(overlap.matched_mo_keywords as string[])?.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {(overlap.matched_mo_keywords as string[]).map((kw: string, i: number) => (
+                              <Badge key={i} variant="outline" className="text-xs">{kw}</Badge>
+                            ))}
+                          </div>
+                        )}
+                        {ai?.summary && (
+                          <p className="text-xs text-slate-500 mt-1.5 italic">{ai.summary as string}</p>
+                        )}
+                      </div>
                     )
                   })}
                 </div>
