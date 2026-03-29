@@ -90,6 +90,50 @@ export default function RegistryPage() {
   const totalCount = data?.count ?? 0
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
+  // Fetch match/overlap counts for visible records
+  const submissionIds = records.map(r => r.submission_id).filter(Boolean) as string[]
+  const { data: matchCounts } = useQuery({
+    queryKey: ['registry-match-counts', submissionIds.join(',')],
+    queryFn: async () => {
+      if (!submissionIds.length) return {}
+
+      // Get DOE match counts per submission (strong+ only)
+      const counts: Record<string, { matches: number; offenders: number }> = {}
+
+      // Batch in chunks of 20
+      for (let i = 0; i < submissionIds.length; i += 20) {
+        const chunk = submissionIds.slice(i, i + 20)
+
+        const [matchData, offenderData] = await Promise.all([
+          supabase
+            .from('doe_match_candidates')
+            .select('missing_submission_id')
+            .in('missing_submission_id', chunk)
+            .in('grade', ['very_strong', 'strong']),
+          supabase
+            .from('offender_case_overlaps')
+            .select('submission_id')
+            .in('submission_id', chunk)
+            .gte('composite_score', 65),
+        ])
+
+        for (const m of matchData.data ?? []) {
+          const sid = (m as Record<string, string>).missing_submission_id
+          if (!counts[sid]) counts[sid] = { matches: 0, offenders: 0 }
+          counts[sid].matches++
+        }
+        for (const o of offenderData.data ?? []) {
+          const sid = (o as Record<string, string>).submission_id
+          if (!counts[sid]) counts[sid] = { matches: 0, offenders: 0 }
+          counts[sid].offenders++
+        }
+      }
+
+      return counts
+    },
+    enabled: submissionIds.length > 0,
+  })
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div>
@@ -182,10 +226,13 @@ export default function RegistryPage() {
           {records.map((record) => {
             const isMissing = record.record_type === 'missing_person'
             const source = record.source as { display_name: string; slug: string } | null
+            const mc = record.submission_id ? (matchCounts ?? {})[record.submission_id as string] : undefined
 
             return (
               <Link key={record.id} href={`/registry/${record.id}`}>
-                <Card className="hover:shadow-md transition-shadow cursor-pointer">
+                <Card className={`hover:shadow-md transition-shadow cursor-pointer ${
+                  mc && mc.matches > 0 ? 'border-l-4 border-l-indigo-400' : ''
+                }`}>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
                       <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
@@ -195,16 +242,26 @@ export default function RegistryPage() {
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-slate-900 text-sm">
                             {record.person_name ?? 'Unidentified'}
                           </span>
                           <Badge variant={isMissing ? 'default' : 'secondary'} className="text-xs">
                             {isMissing ? 'Missing' : 'Unidentified'}
                           </Badge>
-                          {record.ai_processed && (
-                            <Badge variant="outline" className="text-xs text-green-600 border-green-200">
-                              AI processed
+                          {mc && mc.matches > 0 && (
+                            <Badge className="text-xs bg-indigo-100 text-indigo-700 border-indigo-200">
+                              {mc.matches} match{mc.matches !== 1 ? 'es' : ''}
+                            </Badge>
+                          )}
+                          {mc && mc.offenders > 0 && (
+                            <Badge className="text-xs bg-red-100 text-red-700 border-red-200">
+                              {mc.offenders} offender overlap{mc.offenders !== 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                          {record.classification && (
+                            <Badge variant="outline" className="text-xs">
+                              {record.classification as string}
                             </Badge>
                           )}
                         </div>
