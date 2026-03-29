@@ -26,16 +26,21 @@ import {
 } from 'lucide-react'
 
 const US_STATES = [
-  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
-  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
-  'VA','WA','WV','WI','WY','DC','PR',
+  'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
+  'Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
+  'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan',
+  'Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire',
+  'New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio',
+  'Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota',
+  'Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia',
+  'Wisconsin','Wyoming','District of Columbia','Puerto Rico',
 ]
 
 export default function RegistryPage() {
   const supabase = createClient()
 
   const [search, setSearch] = useState('')
+  const [city, setCity] = useState('')
   const [recordType, setRecordType] = useState<string>('all')
   const [state, setState] = useState<string>('all')
   const [sex, setSex] = useState<string>('all')
@@ -43,7 +48,7 @@ export default function RegistryPage() {
   const PAGE_SIZE = 25
 
   const { data, isLoading } = useQuery({
-    queryKey: ['registry', search, recordType, state, sex, page],
+    queryKey: ['registry', search, city, recordType, state, sex, page],
     queryFn: async () => {
       let query = supabase
         .from('import_records')
@@ -52,10 +57,11 @@ export default function RegistryPage() {
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
       if (recordType !== 'all') query = query.eq('record_type', recordType)
-      if (state !== 'all') query = query.eq('state', state)
+      if (state !== 'all') query = query.ilike('state', `%${state}%`)
       if (sex !== 'all') query = query.ilike('sex', `${sex}%`)
+      if (city.trim()) query = query.ilike('city', `%${city.trim()}%`)
       if (search.trim()) {
-        query = query.or(`person_name.ilike.%${search}%,city.ilike.%${search}%,external_id.ilike.%${search}%`)
+        query = query.or(`person_name.ilike.%${search}%,external_id.ilike.%${search}%`)
       }
 
       const { data: records, count, error } = await query
@@ -104,26 +110,24 @@ export default function RegistryPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <div className="flex-1 min-w-[200px]">
+        <div className="flex-1 min-w-[180px]">
           <Input
-            placeholder="Search by name, city, or case ID..."
+            placeholder="Search by name or case ID..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0) }}
             className="w-full"
           />
         </div>
-        <Select value={recordType} onValueChange={(v) => { setRecordType(v); setPage(0) }}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All types</SelectItem>
-            <SelectItem value="missing_person">Missing persons</SelectItem>
-            <SelectItem value="unidentified_remains">Unidentified remains</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="w-[180px]">
+          <Input
+            placeholder="City (e.g. Salt Lake City)"
+            value={city}
+            onChange={(e) => { setCity(e.target.value); setPage(0) }}
+            className="w-full"
+          />
+        </div>
         <Select value={state} onValueChange={(v) => { setState(v); setPage(0) }}>
-          <SelectTrigger className="w-[120px]">
+          <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="State" />
           </SelectTrigger>
           <SelectContent>
@@ -133,8 +137,18 @@ export default function RegistryPage() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={recordType} onValueChange={(v) => { setRecordType(v); setPage(0) }}>
+          <SelectTrigger className="w-[170px]">
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            <SelectItem value="missing_person">Missing persons</SelectItem>
+            <SelectItem value="unidentified_remains">Unidentified remains</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={sex} onValueChange={(v) => { setSex(v); setPage(0) }}>
-          <SelectTrigger className="w-[120px]">
+          <SelectTrigger className="w-[110px]">
             <SelectValue placeholder="Sex" />
           </SelectTrigger>
           <SelectContent>
