@@ -97,18 +97,23 @@ export default function RegistryPage() {
     queryFn: async () => {
       if (!submissionIds.length) return {}
 
-      // Get DOE match counts per submission (strong+ only)
       const counts: Record<string, { matches: number; offenders: number }> = {}
 
-      // Batch in chunks of 20
       for (let i = 0; i < submissionIds.length; i += 20) {
         const chunk = submissionIds.slice(i, i + 20)
 
-        const [matchData, offenderData] = await Promise.all([
+        const [missingMatches, unidentifiedMatches, offenderData] = await Promise.all([
+          // Matches where this person is the missing side
           supabase
             .from('doe_match_candidates')
             .select('missing_submission_id')
             .in('missing_submission_id', chunk)
+            .in('grade', ['very_strong', 'strong']),
+          // Matches where this person is the unidentified side
+          supabase
+            .from('doe_match_candidates')
+            .select('unidentified_submission_id')
+            .in('unidentified_submission_id', chunk)
             .in('grade', ['very_strong', 'strong']),
           supabase
             .from('offender_case_overlaps')
@@ -117,8 +122,13 @@ export default function RegistryPage() {
             .gte('composite_score', 65),
         ])
 
-        for (const m of matchData.data ?? []) {
+        for (const m of missingMatches.data ?? []) {
           const sid = (m as Record<string, string>).missing_submission_id
+          if (!counts[sid]) counts[sid] = { matches: 0, offenders: 0 }
+          counts[sid].matches++
+        }
+        for (const m of unidentifiedMatches.data ?? []) {
+          const sid = (m as Record<string, string>).unidentified_submission_id
           if (!counts[sid]) counts[sid] = { matches: 0, offenders: 0 }
           counts[sid].matches++
         }
