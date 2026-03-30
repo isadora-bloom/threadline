@@ -80,11 +80,12 @@ export default function IntelligencePage() {
     },
   })
 
-  const primaryCase = systemCases?.find(c =>
-    c.title?.toLowerCase().includes('doe') ||
-    c.title?.toLowerCase().includes('namus') ||
-    c.title?.toLowerCase().includes('missing')
-  ) ?? systemCases?.[0]
+  // Prefer NamUs Missing (most data), then Doe Network Missing, then Charley
+  const primaryCase =
+    systemCases?.find(c => c.title?.includes('NamUs') && c.title?.includes('Missing')) ??
+    systemCases?.find(c => c.title?.includes('Doe Network') && c.title?.includes('Missing')) ??
+    systemCases?.find(c => c.title?.includes('Missing')) ??
+    systemCases?.[0]
 
   const caseId = primaryCase?.id
 
