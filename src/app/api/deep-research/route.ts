@@ -66,8 +66,38 @@ export async function POST(req: NextRequest) {
       throw new Error('No AI response')
     }
 
-    const raw = textBlock.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-    const findings = JSON.parse(raw)
+    let raw = textBlock.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
+
+    // Fix truncated JSON — Haiku may cut off mid-response
+    let findings: Record<string, unknown>
+    try {
+      findings = JSON.parse(raw)
+    } catch {
+      // Try to salvage truncated JSON by closing open brackets
+      let fixed = raw
+      const openBraces = (fixed.match(/\{/g) ?? []).length
+      const closeBraces = (fixed.match(/\}/g) ?? []).length
+      const openBrackets = (fixed.match(/\[/g) ?? []).length
+      const closeBrackets = (fixed.match(/\]/g) ?? []).length
+
+      // Remove trailing incomplete value
+      fixed = fixed.replace(/,\s*"[^"]*"?\s*:?\s*[^}\]]*$/, '')
+      // Close arrays then objects
+      for (let i = 0; i < openBrackets - closeBrackets; i++) fixed += ']'
+      for (let i = 0; i < openBraces - closeBraces; i++) fixed += '}'
+
+      try {
+        findings = JSON.parse(fixed)
+      } catch {
+        // Last resort: extract what we can as plain text summary
+        const summaryMatch = raw.match(/"(?:executive_summary|summary)"\s*:\s*"([^"]*)"/)
+        findings = {
+          executive_summary: summaryMatch?.[1] ?? raw.slice(0, 500),
+          _parse_error: true,
+          _raw_truncated: raw.slice(0, 1000),
+        }
+      }
+    }
 
     // Update research task
     await serviceClient
