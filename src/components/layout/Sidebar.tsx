@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useParams, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Briefcase, LogOut, Radar, Users, Search, Flame, BookOpen, Brain, Star, Fingerprint, User, HelpCircle } from 'lucide-react'
+import { Briefcase, LogOut, Radar, Users, Search, Flame, BookOpen, Brain, Star, Fingerprint, User, HelpCircle, MessageSquare } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -118,6 +118,7 @@ export function Sidebar() {
     { href: '/research', label: 'AI Research', icon: BookOpen },
     { href: '/profile', label: 'My Profile', icon: User },
     { href: '/guide', label: 'How It Works', icon: HelpCircle },
+    { href: '/feedback', label: 'Feedback', icon: MessageSquare },
   ]
 
   return (

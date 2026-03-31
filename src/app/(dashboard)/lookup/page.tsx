@@ -92,6 +92,17 @@ export default function LookupPage() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
+      {/* Dev banner */}
+      <div className="flex items-center justify-between gap-3 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5">
+        <p className="text-xs text-indigo-700">
+          <span className="font-semibold">Threadline is in active development.</span> Things may be rough around the edges.
+          Your feedback helps shape what gets built next.
+        </p>
+        <Link href="/feedback" className="text-xs font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap">
+          Send feedback →
+        </Link>
+      </div>
+
       {/* Hero */}
       <div className="text-center py-8">
         <h1 className="text-3xl font-bold text-slate-900 mb-2">Who are you looking for?</h1>
