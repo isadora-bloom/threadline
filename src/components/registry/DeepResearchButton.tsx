@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Brain, Loader2 } from 'lucide-react'
 import {
@@ -13,8 +14,11 @@ import {
 } from '@/components/ui/dialog'
 
 export function DeepResearchButton({ recordId, isWatching = false }: { recordId: string; isWatching?: boolean }) {
+  const supabase = createClient()
   const [loading, setLoading] = useState(false)
   const [watchPrompt, setWatchPrompt] = useState(false)
+  const [existingResearch, setExistingResearch] = useState<{ summary: string; created_at: string } | null>(null)
+  const [checkedExisting, setCheckedExisting] = useState(false)
   const [result, setResult] = useState<{
     status: string
     summary?: string
@@ -68,7 +72,36 @@ export function DeepResearchButton({ recordId, isWatching = false }: { recordId:
           </DialogDescription>
         </DialogHeader>
 
-        {!result && !loading && !isWatching && (
+        {/* Check for existing research on open */}
+        {open && !checkedExisting && (() => {
+          supabase.from('deep_research').select('summary, created_at')
+            .eq('import_record_id', recordId).eq('status', 'complete')
+            .order('created_at', { ascending: false }).limit(1)
+            .then(({ data }) => {
+              setCheckedExisting(true)
+              if (data?.[0]) setExistingResearch(data[0] as { summary: string; created_at: string })
+            })
+          return null
+        })()}
+
+        {existingResearch && !result && !loading && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+              <p className="text-xs font-semibold text-green-800 mb-1">Research already completed</p>
+              <p className="text-sm text-green-900">{existingResearch.summary}</p>
+              <p className="text-[10px] text-green-600 mt-2">
+                Completed {new Date(existingResearch.created_at).toLocaleDateString()} — visible to all watchers of this case
+              </p>
+            </div>
+            {isWatching && (
+              <Button variant="outline" onClick={runResearch} className="w-full text-xs">
+                Run new research (updates will be shared with all watchers)
+              </Button>
+            )}
+          </div>
+        )}
+
+        {!result && !loading && !isWatching && !existingResearch && (
           <div className="space-y-4">
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
               <p className="font-medium mb-1">Add this case to your watchlist first</p>
@@ -80,7 +113,7 @@ export function DeepResearchButton({ recordId, isWatching = false }: { recordId:
           </div>
         )}
 
-        {!result && !loading && isWatching && (
+        {!result && !loading && isWatching && !existingResearch && (
           <div className="space-y-4">
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               This will use AI to analyze all available data. Results are suggestions, not conclusions.
