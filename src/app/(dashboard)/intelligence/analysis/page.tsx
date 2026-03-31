@@ -54,6 +54,7 @@ export default function IntelligencePage() {
   const [isRunningAnalysis, setIsRunningAnalysis] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [alertsDismissed, setAlertsDismissed] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   // Find system cases
   const { data: systemCases, isLoading: casesLoading } = useQuery({
@@ -68,6 +69,10 @@ export default function IntelligencePage() {
         .eq('user_id', user.id)
 
       if (!roles?.length) return []
+
+      // Store whether user is admin (lead_investigator on any case)
+      const hasLeadRole = roles.some(r => (r as { role: string }).role === 'lead_investigator' || (r as { role: string }).role === 'admin')
+      setIsAdmin(hasLeadRole)
 
       const caseIds = roles.map(r => r.case_id)
       const { data: cases } = await supabase
@@ -201,18 +206,20 @@ export default function IntelligencePage() {
           </p>
         </div>
 
-        <Button
-          onClick={handleRunAnalysis}
-          disabled={isRunningAnalysis}
-          size="sm"
-        >
-          {isRunningAnalysis ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          {isRunningAnalysis ? 'Analyzing...' : 'Run analysis'}
-        </Button>
+        {isAdmin && (
+          <Button
+            onClick={handleRunAnalysis}
+            disabled={isRunningAnalysis}
+            size="sm"
+          >
+            {isRunningAnalysis ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {isRunningAnalysis ? 'Analyzing...' : 'Run analysis'}
+          </Button>
+        )}
       </div>
 
       {/* Stalled case alerts */}
@@ -355,7 +362,7 @@ export default function IntelligencePage() {
         </TabsList>
 
         <TabsContent value="doe-match" className="mt-4">
-          <DoeMatchView caseId={caseId} canManage={true} />
+          <DoeMatchView caseId={caseId} canManage={isAdmin} />
         </TabsContent>
 
         <TabsContent value="offenders" className="mt-4">

@@ -12,8 +12,9 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
-export function DeepResearchButton({ recordId }: { recordId: string }) {
+export function DeepResearchButton({ recordId, isWatching = false }: { recordId: string; isWatching?: boolean }) {
   const [loading, setLoading] = useState(false)
+  const [watchPrompt, setWatchPrompt] = useState(false)
   const [result, setResult] = useState<{
     status: string
     summary?: string
@@ -67,7 +68,19 @@ export function DeepResearchButton({ recordId }: { recordId: string }) {
           </DialogDescription>
         </DialogHeader>
 
-        {!result && !loading && (
+        {!result && !loading && !isWatching && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              <p className="font-medium mb-1">Add this case to your watchlist first</p>
+              <p className="text-xs">
+                Deep research is available for cases you&apos;re watching. This ensures you&apos;re invested in
+                the results and can follow up on what the AI finds.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!result && !loading && isWatching && (
           <div className="space-y-4">
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               This will use AI to analyze all available data. Results are suggestions, not conclusions.

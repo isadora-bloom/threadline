@@ -236,7 +236,7 @@ export default async function RegistryProfilePage({
               isWatching={!!isWatching}
               userId={user.id}
             />
-            <DeepResearchButton recordId={recordId} />
+            <DeepResearchButton recordId={recordId} isWatching={!!isWatching} />
           </div>
           <TagButton importRecordId={recordId} />
         </div>
