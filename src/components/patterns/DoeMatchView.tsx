@@ -1828,8 +1828,15 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     },
   })
 
-  // Use the missing persons case with the most matches
+  // Use NamUs missing for matches (most data), Doe Network for stalls/entities/offenders
   const effectiveCaseId = doeCases?.missing ?? caseId
+
+  // Stalls, entities, and clusters may be stored under a different case (Doe Network)
+  // Find the Doe Network missing case for these queries
+  const doeMissingId = (doeCases?.all ?? []).find((c: { id: string; title: string }) =>
+    c.title.includes('Doe Network') && c.title.includes('Missing')
+  )?.id
+  const stallCaseId = doeMissingId ?? effectiveCaseId
 
   // Fetch match candidates
   const matchQuery = useQuery({
@@ -1879,11 +1886,11 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
     enabled: activeTab === 'clusters',
   })
 
-  // Fetch stall flags
+  // Fetch stall flags (may be stored under Doe Network case)
   const stallQuery = useQuery({
-    queryKey: ['doe-stalls', effectiveCaseId, statusFilter, stallTypeFilter, page],
+    queryKey: ['doe-stalls', stallCaseId, statusFilter, stallTypeFilter, page],
     queryFn: async () => {
-      const p = new URLSearchParams({ missingCaseId: effectiveCaseId, type: 'stalls', page: String(page) })
+      const p = new URLSearchParams({ missingCaseId: stallCaseId, type: 'stalls', page: String(page) })
       if (statusFilter !== 'all')   p.set('reviewerStatus', statusFilter)
       if (stallTypeFilter !== 'all') p.set('stallType', stallTypeFilter)
       const res = await fetch(`/api/pattern/doe-match?${p}`)
@@ -1894,9 +1901,9 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
 
   // Fetch entity mentions
   const entityQuery = useQuery({
-    queryKey: ['doe-entities', effectiveCaseId, entityTypeFilter, page],
+    queryKey: ['doe-entities', stallCaseId, entityTypeFilter, page],
     queryFn: async () => {
-      const p = new URLSearchParams({ missingCaseId: effectiveCaseId, type: 'entities', page: String(page) })
+      const p = new URLSearchParams({ missingCaseId: stallCaseId, type: 'entities', page: String(page) })
       if (entityTypeFilter !== 'all') p.set('entityType', entityTypeFilter)
       const res = await fetch(`/api/pattern/doe-match?${p}`)
       return await res.json() as { entities: DoeEntityMention[]; total: number }

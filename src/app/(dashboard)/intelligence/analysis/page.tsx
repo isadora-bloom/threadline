@@ -80,14 +80,17 @@ export default function IntelligencePage() {
     },
   })
 
-  // Prefer NamUs Missing (most data), then Doe Network Missing, then Charley
-  const primaryCase =
-    systemCases?.find(c => c.title?.includes('NamUs') && c.title?.includes('Missing')) ??
-    systemCases?.find(c => c.title?.includes('Doe Network') && c.title?.includes('Missing')) ??
-    systemCases?.find(c => c.title?.includes('Missing')) ??
-    systemCases?.[0]
+  // Find specific cases for different components
+  const namusMissingCase = systemCases?.find(c => c.title?.includes('NamUs') && c.title?.includes('Missing'))
+  const doeMissingCase = systemCases?.find(c => c.title?.includes('Doe Network') && c.title?.includes('Missing'))
+  const charleyCase = systemCases?.find(c => c.title?.includes('Charley'))
 
+  // Primary case for DOE matching (NamUs has the most matches)
+  const primaryCase = namusMissingCase ?? doeMissingCase ?? charleyCase ?? systemCases?.[0]
   const caseId = primaryCase?.id
+
+  // Offender overlaps + stalls are stored under Doe Network case
+  const offenderCaseId = doeMissingCase?.id ?? caseId
 
   // Stats from the actual matcher tables (not the rule-based queue)
   const { data: stats } = useQuery({
@@ -356,7 +359,7 @@ export default function IntelligencePage() {
         </TabsContent>
 
         <TabsContent value="offenders" className="mt-4">
-          <OffenderView caseId={caseId} />
+          <OffenderView caseId={offenderCaseId} />
         </TabsContent>
 
         <TabsContent value="geo" className="mt-4">
