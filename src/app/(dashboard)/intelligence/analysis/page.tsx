@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,8 +15,7 @@ import { SocialNetworkGraph } from '@/components/patterns/SocialNetworkGraph'
 import { DoeMatchView } from '@/components/patterns/DoeMatchView'
 import dynamic from 'next/dynamic'
 import { OffenderView } from '@/components/patterns/OffenderView'
-import { InvestigativeThreads } from '@/components/patterns/InvestigativeThreads'
-import { ResearchTaskList } from '@/components/research/ResearchTaskList'
+// Threads and Research now directed to watchlist/registry profiles
 
 const GeoView = dynamic(
   () => import('@/components/patterns/GeoView').then(m => ({ default: m.GeoView })),
@@ -383,11 +383,30 @@ export default function IntelligencePage() {
         </TabsContent>
 
         <TabsContent value="threads" className="mt-4">
-          <InvestigativeThreads caseId={caseId} canGenerate={true} />
+          <div className="py-10 text-center space-y-3">
+            <Sparkles className="h-8 w-8 text-slate-300 mx-auto" />
+            <h3 className="font-semibold text-slate-700">Threads are generated from your watched cases</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">
+              Add cases to your watchlist, then use &quot;Threadline AI&quot; on each case profile to generate
+              investigative threads and deep research specific to the cases you care about.
+            </p>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Link href="/my-watchlist" className="text-sm text-indigo-600 font-medium hover:underline">Go to My Cases →</Link>
+              <Link href="/registry" className="text-sm text-slate-500 hover:text-slate-700">Browse registry</Link>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="research" className="mt-4">
-          <ResearchTaskList caseId={caseId} canManage={true} />
+          <div className="py-10 text-center space-y-3">
+            <Microscope className="h-8 w-8 text-slate-300 mx-auto" />
+            <h3 className="font-semibold text-slate-700">Research runs on individual cases</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">
+              Open any person in the registry and click &quot;Threadline AI&quot; to run deep research —
+              connections, offender overlaps, timeline, next steps. Results appear on their profile
+              and on the <Link href="/research" className="text-indigo-600 hover:underline">AI Research</Link> page.
+            </p>
+          </div>
         </TabsContent>
       </Tabs>
     </div>
