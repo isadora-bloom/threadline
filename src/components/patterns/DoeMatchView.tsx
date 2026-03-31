@@ -18,6 +18,7 @@ import {
   Skull, Flame, Brain, Car, UserX, Search, ShieldAlert,
   Fingerprint, Globe, ExternalLink, ArrowUpDown, X,
 } from 'lucide-react'
+import { TattooMatchCard } from './TattooMatchCard'
 
 interface AiAssessment {
   connection_level?: number          // 1–5 (new universal rating)
@@ -3250,57 +3251,14 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
             </div>
           ) : (
             <div className="space-y-2">
-              {(tattooMatchQuery.data?.items ?? []).map((item: Record<string, unknown>) => {
-                const details = item.details as Record<string, unknown> | null
-                const score = item.priority_score as number
-                const locMatch = details?.location_match as boolean
-
-                return (
-                  <div key={item.id as string} className={`p-3 rounded-lg border ${
-                    locMatch ? 'border-purple-300 bg-purple-50' : 'border-slate-200 bg-slate-50'
-                  }`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold ${
-                          score >= 80 ? 'bg-purple-200 text-purple-900' :
-                          score >= 60 ? 'bg-amber-200 text-amber-900' :
-                          'bg-slate-200 text-slate-700'
-                        }`}>
-                          {score}
-                        </span>
-                        {locMatch && (
-                          <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
-                            SAME BODY LOCATION
-                          </span>
-                        )}
-                        <span className="text-[10px] text-slate-500">
-                          {(details?.strength as string) === 'description_and_location' ? 'Description + Location' : 'Description only'}
-                        </span>
-                      </div>
-                    </div>
-                    <h4 className="text-sm font-semibold text-slate-900 mb-1">
-                      {item.title as string}
-                    </h4>
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {((details?.shared_keywords ?? []) as string[]).map((kw: string, i: number) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-purple-100 text-purple-800 text-[10px] font-medium rounded">
-                          {kw}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-[10px]">
-                      <div>
-                        <span className="font-semibold text-blue-600">Missing:</span>
-                        <p className="text-slate-600 mt-0.5 line-clamp-3">{details?.missing_mark as string}</p>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-slate-500">Unidentified:</span>
-                        <p className="text-slate-600 mt-0.5 line-clamp-3">{details?.unidentified_mark as string}</p>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
+              {(tattooMatchQuery.data?.items ?? []).map((item: Record<string, unknown>) => (
+                <TattooMatchCard
+                  key={item.id as string}
+                  item={item as never}
+                  missingCaseId={effectiveCaseId}
+                  onStatusChange={() => queryClient.invalidateQueries({ queryKey: ['tattoo-matches'] })}
+                />
+              ))}
             </div>
           )}
           {(tattooMatchQuery.data?.total ?? 0) > 50 && (

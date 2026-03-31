@@ -117,6 +117,73 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { matchId, missingCaseId, batchSize = 15, routeMatches = false } = body
 
+  // ── Tattoo match AI review ─────────────────────────────────────────────────
+  if (body.tattooReview) {
+    const { missingText, unidentifiedText, sharedKeywords, locationMatch, queueItemId } = body
+
+    const tattooPrompt = `You are reviewing a potential match between a missing person and unidentified remains based on their distinguishing marks (tattoos, scars, piercings, birthmarks).
+
+Shared keywords detected: ${(sharedKeywords ?? []).join(', ')}
+Body location match: ${locationMatch ? 'YES — same body region' : 'No — different or unknown locations'}
+
+Assess whether these mark descriptions could belong to the same person. Consider:
+- Do the specific designs match (not just the category)?
+- Could differences be explained by decomposition, fading, or imprecise descriptions?
+- Are there contradicting marks (one person has something the other definitely doesn't)?
+
+Rate 1-5:
+1 = Clear mismatch (different designs, contradicting details)
+2 = Generic overlap only ("cross" is very common — need more specificity)
+3 = Plausible — descriptions are compatible but not distinctive enough to confirm
+4 = Strong — specific design elements match (e.g., "heart with dagger" on both)
+5 = Very strong — highly specific match (e.g., "rose tattoo with name 'Maria' on left shoulder blade")
+
+Respond with JSON only:
+{
+  "connection_level": 1-5,
+  "summary": "Assessment explaining your reasoning",
+  "supporting": ["specific matching details"],
+  "conflicting": ["specific contradictions or concerns"]
+}`
+
+    try {
+      const msg = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        system: tattooPrompt,
+        messages: [{
+          role: 'user',
+          content: `MISSING PERSON:\n${missingText}\n\n---\n\nUNIDENTIFIED REMAINS:\n${unidentifiedText}`,
+        }],
+      })
+
+      let assessment: Record<string, unknown> = { connection_level: 2, summary: 'Could not parse', supporting: [], conflicting: [] }
+      const text = msg.content[0].type === 'text' ? msg.content[0].text : ''
+      try {
+        const m = text.match(/\{[\s\S]*\}/)
+        if (m) {
+          const parsed = JSON.parse(m[0])
+          const lvl = parseInt(String(parsed.connection_level ?? 2))
+          assessment = { ...parsed, connection_level: Math.max(1, Math.min(5, isNaN(lvl) ? 2 : lvl)) }
+        }
+      } catch { /* keep default */ }
+
+      const result = { ...assessment, reviewed_at: new Date().toISOString(), model: 'claude-haiku-4-5-20251001' }
+
+      // Store reasoning on queue item
+      if (queueItemId) {
+        await supabase
+          .from('intelligence_queue' as never)
+          .update({ ai_reasoning: result.summary } as never)
+          .eq('id', queueItemId)
+      }
+
+      return NextResponse.json({ ok: true, assessment: result })
+    } catch (err) {
+      return NextResponse.json({ error: 'AI review failed' }, { status: 500 })
+    }
+  }
+
   // ── Single review ──────────────────────────────────────────────────────────
   if (matchId) {
     const assessment = await reviewOne(supabase, matchId)
