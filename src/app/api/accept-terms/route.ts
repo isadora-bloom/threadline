@@ -51,5 +51,33 @@ export async function POST() {
       accepted_tos_version: CURRENT_TOS_VERSION,
     })
 
+  // Auto-assign new user as reviewer on all system cases
+  // This gives them access to the full intelligence base
+  const systemCaseTitles = [
+    'NamUs Import — Missing Persons',
+    'NamUs Import — Unidentified Remains',
+    'Doe Network Import — Missing Persons',
+    'Doe Network Import — Unidentified Persons',
+    'Doe Network Import — Unidentified Remains',
+    'Charley Project Import — Missing Persons',
+  ]
+
+  const { data: systemCases } = await supabase
+    .from('cases')
+    .select('id')
+    .in('title', systemCaseTitles)
+
+  if (systemCases?.length) {
+    const roles = systemCases.map(c => ({
+      case_id: (c as { id: string }).id,
+      user_id: user.id,
+      role: 'reviewer',
+    }))
+
+    for (const role of roles) {
+      await supabase.from('case_user_roles').upsert(role, { onConflict: 'case_id,user_id' })
+    }
+  }
+
   return NextResponse.json({ ok: true })
 }

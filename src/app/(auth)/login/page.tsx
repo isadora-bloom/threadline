@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Mail, CheckCircle, Eye, EyeOff } from 'lucide-react'
 
-type Mode = 'password' | 'magic' | 'reset'
+type Mode = 'password' | 'signup' | 'magic' | 'reset'
 
 export default function LoginPage() {
   const supabase = createClient()
@@ -41,6 +41,27 @@ export default function LoginPage() {
       )
     } else {
       window.location.href = '/'
+    }
+  }
+
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email || !password) return
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return }
+    setLoading(true)
+    setError(null)
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    })
+
+    setLoading(false)
+    if (error) {
+      setError(error.message === 'User already registered' ? 'An account with this email already exists. Try signing in.' : error.message)
+    } else {
+      setSent(true)
     }
   }
 
@@ -77,12 +98,14 @@ export default function LoginPage() {
 
   const titles: Record<Mode, string> = {
     password: 'Sign in',
+    signup: 'Create an account',
     magic: 'Sign in with email link',
     reset: 'Reset your password',
   }
 
   const descriptions: Record<Mode, string> = {
     password: 'Enter your email and password.',
+    signup: 'Join Threadline — free forever.',
     magic: 'We\'ll send a sign-in link to your inbox.',
     reset: 'We\'ll send a password reset link to your inbox.',
   }
@@ -195,6 +218,68 @@ export default function LoginPage() {
                     Use email link instead
                   </button>
                 </div>
+                <div className="text-center pt-3 border-t border-slate-100 mt-3">
+                  <span className="text-sm text-slate-500">Don&apos;t have an account? </span>
+                  <button
+                    type="button"
+                    onClick={() => { setMode('signup'); setError(null) }}
+                    className="text-sm text-indigo-600 font-medium hover:underline"
+                  >
+                    Sign up free
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {mode === 'signup' && (
+              <form onSubmit={handleSignup} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email-signup">Email</Label>
+                  <Input
+                    id="email-signup"
+                    type="email"
+                    placeholder="you@email.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password-signup">Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="password-signup"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      required
+                      minLength={8}
+                      placeholder="At least 8 characters"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? 'Creating account...' : 'Create account'}
+                </Button>
+                <div className="text-center pt-1">
+                  <span className="text-sm text-slate-500">Already have an account? </span>
+                  <button
+                    type="button"
+                    onClick={() => { setMode('password'); setError(null) }}
+                    className="text-sm text-indigo-600 font-medium hover:underline"
+                  >
+                    Sign in
+                  </button>
+                </div>
               </form>
             )}
 
@@ -257,7 +342,7 @@ export default function LoginPage() {
         </Card>
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          Access is by invitation only. Contact your case lead for access.
+          Free forever. No ads. No tracking. Built for people who refuse to give up.
         </p>
       </div>
     </div>
