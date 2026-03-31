@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     const prompt = buildResearchPrompt(record, context)
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20241022',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
     }).catch(err => {
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
         completed_at: new Date().toISOString(),
         summary: findings.executive_summary ?? findings.summary ?? '',
         findings,
-        model_used: 'claude-sonnet-4-6',
+        model_used: 'claude-haiku-4-5',
         tokens_used: response.usage?.output_tokens ?? 0,
       })
       .eq('id', researchTask.id)
