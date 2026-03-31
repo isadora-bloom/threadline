@@ -19,14 +19,50 @@ export default async function NeedingAttentionPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  // Fetch high-solvability cases with few/no watchers
-  // We query solvability_scores + import_records + watchlist counts
-  const { data: solvableRecords } = await supabase
-    .from('solvability_scores')
-    .select('*, import_record:import_records(*, source:import_sources(display_name))')
-    .in('grade', ['high', 'moderate'])
-    .order('score', { ascending: false })
-    .limit(50)
+  // Fetch user's skills for personalized matching
+  const { data: userSkills } = await supabase
+    .from('user_skills')
+    .select('skill, region')
+    .eq('user_id', user.id)
+
+  const skillSet = new Set((userSkills ?? []).map(s => s.skill))
+  const userRegions = (userSkills ?? []).filter(s => s.region).map(s => s.region!.toLowerCase())
+  const hasSkills = skillSet.size > 0
+
+  // Fetch cases that need skills matching the user's profile
+  // If user has skills, prioritize cases needing those skills
+  // If no skills set, fall back to solvability scores
+  let solvableRecords: unknown[] | null = null
+
+  if (hasSkills) {
+    // Fetch records whose needs_skills overlap with user's skills
+    const { data } = await supabase
+      .from('import_records')
+      .select('*, source:import_sources(display_name)')
+      .overlaps('needs_skills', [...skillSet])
+      .order('created_at', { ascending: false })
+      .limit(100)
+
+    solvableRecords = (data ?? []).map(record => ({
+      import_record_id: record.id,
+      score: 50, // default score for skill-matched
+      grade: 'moderate',
+      ai_summary: `Needs: ${(record.needs_skills as string[] ?? []).filter((s: string) => skillSet.has(s)).join(', ')}`,
+      ai_next_steps: [],
+      import_record: record,
+    }))
+  }
+
+  if (!solvableRecords?.length) {
+    // Fall back to solvability scores
+    const { data } = await supabase
+      .from('solvability_scores')
+      .select('*, import_record:import_records(*, source:import_sources(display_name))')
+      .in('grade', ['high', 'moderate'])
+      .order('score', { ascending: false })
+      .limit(50)
+    solvableRecords = data
+  }
 
   // Get watcher counts for these records
   const recordIds = solvableRecords?.map(s => s.import_record_id) ?? []
@@ -74,8 +110,10 @@ export default async function NeedingAttentionPage() {
           <h1 className="text-2xl font-bold text-slate-900">Cases That Need You</h1>
         </div>
         <p className="text-sm text-slate-500">
-          AI has identified these cases as potentially solvable — but nobody is investigating them yet.
-          Your fresh eyes could make the difference.
+          {hasSkills
+            ? `Showing cases that match your skills: ${[...skillSet].join(', ')}. These cases specifically need what you can do.`
+            : 'AI has identified these cases as potentially solvable — but nobody is investigating them yet. Add your skills in My Profile to see personalized matches.'
+          }
         </p>
       </div>
 
