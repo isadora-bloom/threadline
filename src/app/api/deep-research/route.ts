@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 
+export const maxDuration = 60
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 })
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest) {
     const prompt = buildResearchPrompt(record, context)
 
     const response = await anthropic.messages.create({
-      model: 'claude-opus-4-6',
+      model: 'claude-sonnet-4-6-20250514',
       max_tokens: 8192,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -72,7 +74,7 @@ export async function POST(req: NextRequest) {
         completed_at: new Date().toISOString(),
         summary: findings.executive_summary ?? findings.summary ?? '',
         findings,
-        model_used: 'claude-opus-4-6',
+        model_used: 'claude-sonnet-4-6',
         tokens_used: response.usage?.output_tokens ?? 0,
       })
       .eq('id', researchTask.id)
