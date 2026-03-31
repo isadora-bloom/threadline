@@ -197,6 +197,17 @@ function demographicsCompatible(a: Record<string, unknown>, b: Record<string, un
     if (aAge[1] < bAge[0] - 10 || bAge[1] < aAge[0] - 10) return false
   }
 
+  // TEMPORAL: remains cannot be found BEFORE person went missing
+  const missingDate = a.date_missing as string | null ?? a.date as string | null
+  const foundDate = b.date_found as string | null ?? b.date as string | null
+  if (missingDate && foundDate) {
+    const missingTime = new Date(missingDate).getTime()
+    const foundTime = new Date(foundDate).getTime()
+    if (!isNaN(missingTime) && !isNaN(foundTime) && foundTime < missingTime) {
+      return false // chronologically impossible
+    }
+  }
+
   return true
 }
 
@@ -234,7 +245,7 @@ async function main() {
   ]
 
   // Fetch missing persons with marks
-  const missingParsed: Array<{ sub_id: string; name: string | null; sex: string | null; age: string | null; marks: ParsedMark[] }> = []
+  const missingParsed: Array<{ sub_id: string; name: string | null; sex: string | null; age: string | null; date_missing: string | null; marks: ParsedMark[] }> = []
   for (const caseId of missingCaseIds) {
     const { data: subs } = await supabase
       .from('submissions')
@@ -249,12 +260,13 @@ async function main() {
       const name = s.raw_text.match(/^Name:\s*(.+)$/m)?.[1] ?? null
       const sex = s.raw_text.match(/^Sex:\s*(.+)$/m)?.[1] ?? null
       const age = s.raw_text.match(/^Age:\s*(\d+)/m)?.[1] ?? null
-      missingParsed.push({ sub_id: s.id, name, sex, age, marks })
+      const date_missing = s.raw_text.match(/^Date Missing:\s*(.+)$/m)?.[1] ?? null
+      missingParsed.push({ sub_id: s.id, name, sex, age, date_missing, marks })
     }
   }
 
   // Fetch unidentified with marks
-  const unidentifiedParsed: Array<{ sub_id: string; location: string | null; sex: string | null; age: string | null; marks: ParsedMark[] }> = []
+  const unidentifiedParsed: Array<{ sub_id: string; location: string | null; sex: string | null; age: string | null; date_found: string | null; marks: ParsedMark[] }> = []
   for (const caseId of unidentifiedCaseIds) {
     const { data: subs } = await supabase
       .from('submissions')
@@ -269,7 +281,8 @@ async function main() {
       const loc = s.raw_text.match(/^(?:Last Seen|Location Found):\s*(.+)$/m)?.[1] ?? null
       const sex = s.raw_text.match(/^Sex:\s*(.+)$/m)?.[1] ?? null
       const age = s.raw_text.match(/^Age:\s*(\d+)/m)?.[1] ?? null
-      unidentifiedParsed.push({ sub_id: s.id, location: loc, sex, age, marks })
+      const date_found = s.raw_text.match(/^Date Found:\s*(.+)$/m)?.[1] ?? null
+      unidentifiedParsed.push({ sub_id: s.id, location: loc, sex, age, date_found, marks })
     }
   }
 
@@ -285,10 +298,10 @@ async function main() {
     for (const uid of unidentifiedParsed) {
       compared++
 
-      // Demographic pre-filter
+      // Demographic + temporal pre-filter
       if (!demographicsCompatible(
-        { sex: missing.sex, age: missing.age },
-        { sex: uid.sex, age: uid.age }
+        { sex: missing.sex, age: missing.age, date_missing: missing.date_missing },
+        { sex: uid.sex, age: uid.age, date_found: uid.date_found }
       )) {
         eliminated++
         continue
