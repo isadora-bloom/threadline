@@ -54,8 +54,11 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6-20250514',
-      max_tokens: 8192,
+      max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
+    }).catch(err => {
+      console.error('Anthropic API error:', err.message ?? err)
+      throw new Error('AI service error: ' + (err.message ?? 'unknown'))
     })
 
     const textBlock = response.content.find(b => b.type === 'text')
@@ -96,7 +99,8 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', researchTask.id)
 
-    return NextResponse.json({ error: 'Research failed', status: 'failed' }, { status: 500 })
+    const errMsg = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ error: errMsg, status: 'failed', summary: 'Research failed: ' + errMsg }, { status: 500 })
   }
 }
 
@@ -113,20 +117,19 @@ async function gatherResearchContext(
     .order('composite_score', { ascending: false })
     .limit(15)
 
-  // 2. Find similar records by state and demographics
+  // 2. Find similar records by state and demographics (lightweight fields only)
   const { data: similar } = await supabase
     .from('import_records')
-    .select('*')
+    .select('id, person_name, record_type, sex, age_text, race, state, city, date_missing, date_found, circumstances_summary, classification')
     .eq('state', record.state as string)
-    .eq('ai_processed', true)
     .neq('id', recordId)
-    .limit(20)
+    .limit(15)
 
-  // 3. Check known offenders
+  // 3. Check known offenders (limit to 25 most relevant)
   const { data: offenders } = await supabase
     .from('known_offenders')
-    .select('*')
-    .limit(100)
+    .select('id, name, status, victim_states, operation_states, travel_corridors, victim_sex, victim_age_min, victim_age_max, victim_races, mo_keywords, disposal_method, cause_of_death, active_from, active_to, incarcerated_from, incarcerated_to')
+    .limit(25)
 
   // 4. Intelligence queue items mentioning this record
   const { data: queueItems } = await supabase
