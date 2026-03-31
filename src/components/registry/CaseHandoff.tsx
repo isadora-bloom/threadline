@@ -28,6 +28,8 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  Sparkles,
+  Loader2,
 } from 'lucide-react'
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle }> = {
@@ -46,6 +48,7 @@ export function CaseHandoff({ recordId, personName }: { recordId: string; person
   const queryClient = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [aiDrafting, setAiDrafting] = useState(false)
 
   // Form state
   const [agencyName, setAgencyName] = useState('')
@@ -299,6 +302,40 @@ export function CaseHandoff({ recordId, personName }: { recordId: string; person
             </div>
 
             <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs border-indigo-200 text-indigo-700"
+                disabled={aiDrafting}
+                onClick={async () => {
+                  setAiDrafting(true)
+                  try {
+                    const res = await fetch('/api/deep-research', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ importRecordId: recordId, researchType: 'full' }),
+                    })
+                    if (res.ok) {
+                      const data = await res.json()
+                      const summary = data.summary ?? data.findings?.executive_summary ?? ''
+                      const steps = (data.findings?.next_steps ?? []).map((s: { action?: string }) => s.action).filter(Boolean).join('\n- ')
+                      const connections = (data.findings?.connections ?? []).slice(0, 3).map((c: { name?: string; reasoning?: string }) => `${c.name}: ${c.reasoning}`).join('\n')
+
+                      setCustomSummary(
+                        `Re: ${personName ?? 'Case'}\n\n` +
+                        `${summary}\n\n` +
+                        (connections ? `Possible connections identified:\n${connections}\n\n` : '') +
+                        (steps ? `Suggested investigative steps:\n- ${steps}\n\n` : '') +
+                        `This information was surfaced by Threadline (threadline.app), a case intelligence platform that cross-references NamUs, Doe Network, and Charley Project records. ` +
+                        `All matches are statistical — confirmation requires forensic verification.`
+                      )
+                    }
+                  } catch { /* silent */ }
+                  finally { setAiDrafting(false) }
+                }}
+              >
+                {aiDrafting ? <><Loader2 className="h-3 w-3 animate-spin" /> Drafting...</> : <><Sparkles className="h-3 w-3" /> AI Draft</>}
+              </Button>
               <Button
                 size="sm"
                 onClick={() => createHandoff.mutate()}
