@@ -112,10 +112,82 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', researchTask.id)
 
+    // Create individual trackable leads from the findings
+    const leads: Array<{ queue_type: string; priority_score: number; priority_grade: string; title: string; summary: string; details: Record<string, unknown>; related_import_ids: string[] }> = []
+
+    // Connections → leads
+    for (const conn of (findings.connections ?? []) as Array<Record<string, unknown>>) {
+      if (!conn.reasoning && !conn.name) continue
+      leads.push({
+        queue_type: 'new_lead',
+        priority_score: Math.min(100, (conn.connection_strength as number) ?? 50),
+        priority_grade: ((conn.connection_strength as number) ?? 0) >= 70 ? 'high' : 'medium',
+        title: `Connection: ${(record.person_name as string) ?? 'Unknown'} ↔ ${conn.name ?? 'Unknown'}`,
+        summary: (conn.reasoning as string) ?? '',
+        details: { type: 'research_connection', research_id: researchTask.id, ...conn },
+        related_import_ids: [importRecordId],
+      })
+    }
+
+    // Next steps → leads
+    for (const step of (findings.next_steps ?? []) as Array<Record<string, unknown>>) {
+      if (!step.action) continue
+      leads.push({
+        queue_type: 'new_lead',
+        priority_score: step.priority === 'critical' ? 90 : step.priority === 'high' ? 75 : 50,
+        priority_grade: step.priority === 'critical' || step.priority === 'high' ? 'high' : 'medium',
+        title: `Action: ${(step.action as string).slice(0, 100)}`,
+        summary: `${step.action}${step.rationale ? '\n\nWhy: ' + step.rationale : ''}${step.who ? '\n\nWho: ' + step.who : ''}`,
+        details: { type: 'research_action', research_id: researchTask.id, ...step },
+        related_import_ids: [importRecordId],
+      })
+    }
+
+    // Red flags → leads
+    for (const flag of (findings.red_flags ?? []) as Array<Record<string, unknown>>) {
+      if (!flag.flag && !flag.description) continue
+      leads.push({
+        queue_type: 'new_lead',
+        priority_score: flag.severity === 'critical' ? 95 : flag.severity === 'high' ? 80 : 60,
+        priority_grade: flag.severity === 'critical' || flag.severity === 'high' ? 'high' : 'medium',
+        title: `Red flag: ${((flag.flag ?? flag.description) as string).slice(0, 100)}`,
+        summary: `${flag.flag ?? flag.description}${flag.implication ? '\n\nImplication: ' + flag.implication : ''}`,
+        details: { type: 'research_red_flag', research_id: researchTask.id, ...flag },
+        related_import_ids: [importRecordId],
+      })
+    }
+
+    // Unanswered questions → leads
+    for (const q of (findings.unanswered_questions ?? []) as string[]) {
+      if (!q || typeof q !== 'string') continue
+      leads.push({
+        queue_type: 'new_lead',
+        priority_score: 40,
+        priority_grade: 'medium',
+        title: `Question: ${q.slice(0, 100)}`,
+        summary: q,
+        details: { type: 'research_question', research_id: researchTask.id },
+        related_import_ids: [importRecordId],
+      })
+    }
+
+    // Insert leads into intelligence queue
+    if (leads.length > 0) {
+      for (const lead of leads.slice(0, 20)) { // cap at 20 leads per research
+        await serviceClient.from('intelligence_queue').insert({
+          ...lead,
+          ai_reasoning: lead.summary,
+          signal_count: 1,
+          ai_confidence: 0.7,
+        })
+      }
+    }
+
     return NextResponse.json({
       status: 'complete',
       summary: findings.executive_summary ?? findings.summary,
       findings,
+      leads_created: Math.min(leads.length, 20),
     })
 
   } catch (err) {
