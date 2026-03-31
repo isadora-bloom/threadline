@@ -132,21 +132,30 @@ export function GeoView({ caseId }: GeoViewProps) {
   const leafletMapRef = useRef<import('leaflet').Map | null>(null)
   const markersRef = useRef<import('leaflet').CircleMarker[]>([])
 
-  // Find the Doe Network missing persons case ID
+  // Find the case ID with cluster data (NamUs or Doe Network)
   const { data: missingCaseId } = useQuery({
-    queryKey: ['doe-missing-case-id', caseId],
+    queryKey: ['geo-missing-case-id', caseId],
     queryFn: async () => {
       const { data: roles } = await supabase
         .from('case_user_roles')
-        .select('case_id, cases!inner(id, title)')
-        .ilike('cases.title', '%Doe Network%')
+        .select('case_id')
 
       if (!roles || roles.length === 0) return null
+      const caseIds = roles.map(r => (r as { case_id: string }).case_id)
 
-      const missingEntry = (roles as Array<{ case_id: string; cases: { id: string; title: string } | null }>)
-        .find(r => r.cases?.title?.includes('Missing Persons'))
+      const { data: cases } = await supabase
+        .from('cases')
+        .select('id, title')
+        .in('id', caseIds)
+        .or('title.ilike.%Doe Network%,title.ilike.%NamUs%')
 
-      return missingEntry?.case_id ?? roles[0]?.case_id ?? null
+      const all = (cases ?? []) as Array<{ id: string; title: string }>
+
+      // Prefer NamUs Missing (has clusters from latest pipeline run)
+      return all.find(c => c.title.includes('NamUs') && c.title.includes('Missing'))?.id
+        ?? all.find(c => c.title.includes('Doe Network') && c.title.includes('Missing'))?.id
+        ?? all[0]?.id
+        ?? null
     },
   })
 
