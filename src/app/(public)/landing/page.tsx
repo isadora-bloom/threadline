@@ -7,9 +7,7 @@ export default function LandingPage() {
       <nav className="border-b border-slate-100">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600">
-              <span className="text-sm font-bold text-white">TL</span>
-            </div>
+            <img src="/brand/icon.png" alt="Threadline" className="h-8 w-8 rounded-lg" />
             <span className="text-lg font-bold text-slate-900 tracking-tight">Threadline</span>
           </div>
           <div className="flex items-center gap-4">

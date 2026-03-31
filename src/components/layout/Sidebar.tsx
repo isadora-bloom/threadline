@@ -125,10 +125,8 @@ export function Sidebar() {
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-slate-200">
-        <Link href="/intelligence" className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-indigo-600">
-            <span className="text-xs font-bold text-white">TL</span>
-          </div>
+        <Link href="/lookup" className="flex items-center gap-2">
+          <img src="/brand/icon.png" alt="Threadline" className="h-7 w-7 rounded" />
           <span className="text-lg font-bold text-slate-900 tracking-tight">Threadline</span>
         </Link>
       </div>

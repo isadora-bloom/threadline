@@ -115,9 +115,7 @@ export default function LoginPage() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-indigo-600 mb-4">
-              <span className="text-xl font-bold text-white">TL</span>
-            </div>
+            <img src="/brand/icon.png" alt="Threadline" className="h-12 w-12 rounded-lg mx-auto mb-4" />
             <h1 className="text-2xl font-bold text-slate-900">Threadline</h1>
           </div>
           <Card>

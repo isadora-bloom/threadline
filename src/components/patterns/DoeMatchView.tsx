@@ -19,6 +19,7 @@ import {
   Fingerprint, Globe, ExternalLink, ArrowUpDown, X,
 } from 'lucide-react'
 import { TattooMatchCard } from './TattooMatchCard'
+import { QuickWatch } from '@/components/registry/QuickWatch'
 
 interface AiAssessment {
   connection_level?: number          // 1–5 (new universal rating)
@@ -387,7 +388,10 @@ function MatchCard({ match, onReview }: {
                 <div className="flex-1 grid grid-cols-2 gap-3 min-w-0">
                   {/* Missing */}
                   <div className="space-y-0.5">
-                    <div className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide">Missing Person</div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide">Missing Person</div>
+                      <QuickWatch submissionId={match.missing_submission_id} size="xs" />
+                    </div>
                     <div className="text-xs font-semibold text-slate-900 truncate">
                       {match.missing_name ?? 'Unknown name'}
                     </div>
@@ -406,7 +410,10 @@ function MatchCard({ match, onReview }: {
 
                   {/* Unidentified */}
                   <div className="space-y-0.5">
-                    <div className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide">Unidentified</div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide">Unidentified</div>
+                      <QuickWatch submissionId={match.unidentified_submission_id} size="xs" />
+                    </div>
                     <div className="text-xs font-semibold text-slate-900 truncate">
                       {match.unidentified_doe_id ?? 'Unknown ID'}
                     </div>
