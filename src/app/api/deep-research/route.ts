@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     const prompt = buildResearchPrompt(record, context)
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6-20250514',
+      model: 'claude-sonnet-4-5-20241022',
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
     }).catch(err => {
