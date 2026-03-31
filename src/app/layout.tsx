@@ -5,6 +5,10 @@ import { Providers } from './providers'
 export const metadata: Metadata = {
   title: 'Threadline',
   description: 'Case intelligence for the people who refuse to give up.',
+  icons: {
+    icon: '/brand/icon.png',
+    apple: '/brand/icon.png',
+  },
 }
 
 export default function RootLayout({
