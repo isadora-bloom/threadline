@@ -1735,8 +1735,8 @@ function CaseComparisonModal({
 export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'matches' | 'clusters' | 'stalls' | 'entities' | 'route'>('matches')
-  const [gradeFilter, setGradeFilter] = useState('notable_plus')
-  const [statusFilter, setStatusFilter] = useState('unreviewed')
+  const [gradeFilter, setGradeFilter] = useState('very_strong')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(0)
 
   // Cross-match run state
@@ -1847,13 +1847,16 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         type: 'matches',
         page: String(page),
       })
-      if (gradeFilter !== 'all')          params.set('grade', gradeFilter)
+      // Always send grade filter — table is too large without it
+      params.set('grade', gradeFilter === 'all' ? 'very_strong' : gradeFilter)
       if (statusFilter !== 'all')         params.set('reviewerStatus', statusFilter)
       if (aiVerdictFilter !== 'all')      params.set('aiVerdict', aiVerdictFilter)
       const res = await fetch(`/api/pattern/doe-match?${params}`)
+      if (!res.ok) return { matches: [], total: 0 }
       return await res.json() as { matches: DoeMatchCandidate[]; total: number }
     },
     enabled: activeTab === 'matches',
+    retry: false,
   })
 
   // Fetch route match candidates (destination-based)
@@ -1865,12 +1868,14 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         type: 'route_matches',
         page: String(page),
       })
-      if (gradeFilter !== 'all') params.set('grade', gradeFilter)
+      params.set('grade', gradeFilter === 'all' ? 'very_strong' : gradeFilter)
       if (statusFilter !== 'all') params.set('reviewerStatus', statusFilter)
       const res = await fetch(`/api/pattern/doe-match?${params}`)
+      if (!res.ok) return { matches: [], total: 0 }
       return await res.json() as { matches: DoeMatchCandidate[]; total: number }
     },
     enabled: activeTab === 'route',
+    retry: false,
   })
 
   // Fetch clusters
@@ -1884,6 +1889,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       return await res.json() as { clusters: DoeCluster[]; total: number }
     },
     enabled: activeTab === 'clusters',
+    retry: false,
   })
 
   // Fetch stall flags (may be stored under Doe Network case)
@@ -1897,6 +1903,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       return await res.json() as { stalls: DoeStallFlag[]; total: number }
     },
     enabled: activeTab === 'stalls',
+    retry: false,
   })
 
   // Fetch entity mentions
@@ -1909,6 +1916,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       return await res.json() as { entities: DoeEntityMention[]; total: number }
     },
     enabled: activeTab === 'entities',
+    retry: false,
   })
 
   const runCrossMatch = useCallback(async (unidentifiedCaseId: string, startOffset = 0, totalAcc = 0, matchAcc = 0) => {

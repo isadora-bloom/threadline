@@ -3437,12 +3437,14 @@ export async function GET(req: NextRequest) {
       .eq('match_type', 'destination_route_match')
       .order('composite_score', { ascending: false })
 
-    if (grade === 'notable_plus') {
+    // Always filter by grade to avoid timeout on huge table
+    const routeGrade = grade || 'very_strong'
+    if (routeGrade === 'notable_plus') {
       q = (q as unknown as { in: (col: string, vals: string[]) => CQ }).in('grade', ['notable', 'strong', 'very_strong'])
-    } else if (grade) {
-      q = q.eq('grade', grade)
+    } else if (routeGrade !== 'all') {
+      q = q.eq('grade', routeGrade)
     }
-    if (reviewerStatus) q = q.eq('reviewer_status', reviewerStatus)
+    if (reviewerStatus && reviewerStatus !== 'all') q = q.eq('reviewer_status', reviewerStatus)
 
     const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -3450,6 +3452,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Match candidates
+  // CRITICAL: This table has millions of rows. Without a grade filter,
+  // queries will timeout on Supabase. Default to very_strong if no grade specified.
+  const effectiveGrade = grade || 'very_strong'
+
   let q = (supabase
     .from('doe_match_candidates' as never)
     .select('*', { count: 'exact' }) as unknown as CQ)
@@ -3457,16 +3463,16 @@ export async function GET(req: NextRequest) {
     .order('composite_score', { ascending: false })
 
   if (unidentifiedCaseId) q = q.eq('unidentified_case_id', unidentifiedCaseId)
-  if (grade === 'notable_plus') {
+  if (effectiveGrade === 'notable_plus') {
     q = (q as unknown as { in: (col: string, vals: string[]) => CQ }).in('grade', ['notable', 'strong', 'very_strong'])
-  } else if (grade) {
-    q = q.eq('grade', grade)
+  } else if (effectiveGrade !== 'all') {
+    q = q.eq('grade', effectiveGrade)
   }
-  if (reviewerStatus)     q = q.eq('reviewer_status', reviewerStatus)
+  // Only filter by reviewer_status if explicitly provided and not 'all'
+  if (reviewerStatus && reviewerStatus !== 'all') q = q.eq('reviewer_status', reviewerStatus)
   if (aiVerdict === 'reviewed') {
     q = (q as unknown as { not: (col: string, op: string, val: null) => CQ }).not('ai_assessment', 'is', null)
   } else if (aiVerdict === 'strong_plus') {
-    // connection_level 4 or 5 (new system), or legacy verdict=plausible with high confidence
     q = (q as unknown as { or: (s: string) => CQ }).or(
       'ai_assessment->>connection_level.gte.4,and(ai_assessment->>verdict.eq.plausible,ai_assessment->>confidence.eq.high)'
     )
@@ -3477,38 +3483,16 @@ export async function GET(req: NextRequest) {
       'ai_assessment->>connection_level.lte.2,ai_assessment->>verdict.eq.unlikely'
     )
   } else if (aiVerdict) {
-    // legacy fallback
     q = q.eq('ai_assessment->>verdict', aiVerdict)
   }
 
-  // Fetch extra rows to account for deduplication
-  const fetchSize = PAGE_SIZE * 3
-  const { data: rawData, count, error } = await q.range(page * fetchSize, (page + 1) * fetchSize - 1)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  // Deduplicate: same missing person matched to same unidentified person from different
-  // source cases (NamUs + Doe Network) produces duplicate rows. Keep highest-scoring version.
-  type MatchRow = Record<string, unknown>
-  const deduped = new Map<string, MatchRow>()
-  for (const row of (rawData ?? []) as MatchRow[]) {
-    const mName = ((row.missing_name as string) ?? '').toLowerCase().trim()
-    const uLoc  = ((row.unidentified_location as string) ?? '').toLowerCase().trim()
-    const uDate = (row.unidentified_date as string) ?? ''
-    const key   = `${mName}||${uLoc}||${uDate}`
-
-    const existing = deduped.get(key)
-    if (!existing || (row.composite_score as number) > (existing.composite_score as number)) {
-      deduped.set(key, row)
-    }
+  try {
+    const { data, count, error } = await q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ matches: data ?? [], total: count ?? 0, page })
+  } catch (err) {
+    return NextResponse.json({ error: 'Query timeout — try a more specific grade filter', matches: [], total: 0, page }, { status: 200 })
   }
-
-  const matches = [...deduped.values()]
-    .sort((a, b) => (b.composite_score as number) - (a.composite_score as number))
-    .slice(0, PAGE_SIZE)
-
-  const dedupedTotal = count ? Math.round(count * (matches.length / Math.max(1, (rawData as unknown[])?.length ?? 1))) : matches.length
-
-  return NextResponse.json({ matches, total: dedupedTotal, page })
 }
 
 // ─── PATCH — review ──────────────────────────────────────────────────────────
