@@ -23,6 +23,7 @@ import {
 import { WatchButton } from '@/components/registry/WatchButton'
 import { DeepResearchButton } from '@/components/registry/DeepResearchButton'
 import { TagButton } from '@/components/registry/TagButton'
+import { CaseHandoff } from '@/components/registry/CaseHandoff'
 
 export default async function RegistryProfilePage({
   params,
@@ -624,6 +625,9 @@ export default async function RegistryProfilePage({
               </CardContent>
             </Card>
           )}
+
+          {/* Law Enforcement Handoff */}
+          <CaseHandoff recordId={recordId} personName={record.person_name as string | null} />
 
           {/* Community Notes */}
           {communityNotes && communityNotes.length > 0 && (
