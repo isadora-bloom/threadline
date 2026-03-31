@@ -94,13 +94,13 @@ const TATTOO_KEYWORDS = [
   'thug life', 'born to die', 'only god can judge',
   // Cultural/religious
   'jesus', 'christ', 'virgin mary', 'praying hands', 'angel', 'devil', 'demon',
-  'rosary', 'bible', 'buddhist', 'om', 'mandala', 'tribal',
+  'rosary', 'bible', 'buddhist', 'om symbol', 'mandala', 'tribal',
   // Gang/street
   'teardrop', 'three dots', 'five point', 'crown', 'pitchfork',
   'latin kings', 'sureno', 'norteno', 'ms-13', 'ms13',
   // Military
   'military', 'army', 'navy', 'marine', 'usmc', 'airborne', 'special forces',
-  'american flag', 'flag', 'eagle globe anchor', 'dog tags',
+  'american flag', 'eagle globe anchor', 'dog tags',
   // Misc identifiers
   'skull', 'skeleton', 'flames', 'barbed wire', 'chain', 'handcuff',
   'music note', 'treble clef', 'guitar', 'dice', 'cards', 'poker',
@@ -113,7 +113,12 @@ const TATTOO_KEYWORDS = [
 
 function extractKeywords(text: string): string[] {
   const lower = text.toLowerCase()
-  return TATTOO_KEYWORDS.filter(kw => lower.includes(kw))
+  return TATTOO_KEYWORDS.filter(kw => {
+    // Use word boundary matching to avoid substring false positives
+    // e.g., "cross" should not match "across", "om" should not match "from"
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(lower)
+  })
 }
 
 // ── Mark parsing from submission text ────────────────────────────────────────
