@@ -13,6 +13,7 @@ import {
   Loader2,
   User,
   MapPin,
+  Flame,
   Calendar,
   ChevronRight,
   Brain,
@@ -93,13 +94,10 @@ export default function LookupPage() {
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       {/* Hero */}
       <div className="text-center py-8">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-xl bg-indigo-600 mb-4">
-          <Fingerprint className="h-7 w-7 text-white" />
-        </div>
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">Case Lookup</h1>
+        <h1 className="text-3xl font-bold text-slate-900 mb-2">Who are you looking for?</h1>
         <p className="text-slate-500 max-w-lg mx-auto">
-          Enter a NamUs number (e.g. MP12345), a name, or a city.
-          Get instant access to everything Threadline knows — matches, patterns, AI analysis.
+          Search {(59734).toLocaleString()} missing persons and unidentified remains across America.
+          Enter a name, a city, or a NamUs case number.
         </p>
       </div>
 
@@ -117,15 +115,38 @@ export default function LookupPage() {
         </Button>
       </form>
 
-      {/* Examples */}
+      {/* Discovery — shown when no search yet */}
       {!searchTerm && (
-        <div className="flex items-center justify-center gap-3 text-sm text-slate-400">
-          <span>Try:</span>
-          <button onClick={() => { setInput('MP12345'); setSearchTerm('MP12345') }} className="text-indigo-500 hover:text-indigo-700">MP12345</button>
-          <span>&middot;</span>
-          <button onClick={() => { setInput('Jane Doe'); setSearchTerm('Jane Doe') }} className="text-indigo-500 hover:text-indigo-700">Jane Doe</button>
-          <span>&middot;</span>
-          <button onClick={() => { setInput('Houston'); setSearchTerm('Houston') }} className="text-indigo-500 hover:text-indigo-700">Houston</button>
+        <div className="space-y-6">
+          <div className="flex items-center justify-center gap-3 text-sm text-slate-400">
+            <span>Try:</span>
+            <button onClick={() => { setInput('MP12345'); setSearchTerm('MP12345') }} className="text-indigo-500 hover:text-indigo-700">MP12345</button>
+            <span>&middot;</span>
+            <button onClick={() => { setInput('Houston'); setSearchTerm('Houston') }} className="text-indigo-500 hover:text-indigo-700">Houston</button>
+            <span>&middot;</span>
+            <button onClick={() => { setInput('Salt Lake City'); setSearchTerm('Salt Lake City') }} className="text-indigo-500 hover:text-indigo-700">Salt Lake City</button>
+          </div>
+
+          <div className="border-t border-slate-100 pt-6">
+            <h2 className="text-center text-sm font-semibold text-slate-700 mb-4">Not sure where to start?</h2>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <Link href="/needing-attention" className="p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors text-center">
+                <Flame className="h-6 w-6 text-orange-500 mx-auto mb-2" />
+                <span className="text-sm font-medium text-slate-900 block">Cases That Need You</span>
+                <span className="text-xs text-slate-500">Solvable cases that nobody is looking at</span>
+              </Link>
+              <Link href="/registry" className="p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors text-center">
+                <Search className="h-6 w-6 text-indigo-500 mx-auto mb-2" />
+                <span className="text-sm font-medium text-slate-900 block">Browse All Cases</span>
+                <span className="text-xs text-slate-500">Filter by state, city, type</span>
+              </Link>
+              <Link href="/intelligence" className="p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-colors text-center">
+                <Brain className="h-6 w-6 text-purple-500 mx-auto mb-2" />
+                <span className="text-sm font-medium text-slate-900 block">Analysis Engine</span>
+                <span className="text-xs text-slate-500">Matches, offenders, clusters, patterns</span>
+              </Link>
+            </div>
+          </div>
         </div>
       )}
 
@@ -222,38 +243,6 @@ export default function LookupPage() {
         </div>
       )}
 
-      {/* What Threadline does */}
-      <div className="border-t border-slate-200 pt-8 mt-8">
-        <div className="grid sm:grid-cols-3 gap-6 text-center">
-          <div>
-            <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 mb-2">
-              <Search className="h-5 w-5 text-slate-600" />
-            </div>
-            <h3 className="font-semibold text-sm text-slate-900">57,000+ Records</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              Every missing person and unidentified remains from NamUs and The Doe Network.
-            </p>
-          </div>
-          <div>
-            <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 mb-2">
-              <Brain className="h-5 w-5 text-slate-600" />
-            </div>
-            <h3 className="font-semibold text-sm text-slate-900">AI Deep Research</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              One click to get an investigative analysis — connections, offender overlaps, next steps.
-            </p>
-          </div>
-          <div>
-            <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 mb-2">
-              <Star className="h-5 w-5 text-slate-600" />
-            </div>
-            <h3 className="font-semibold text-sm text-slate-900">Community</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              Watch cases, share leads, see who else is investigating. Do something, not just listen.
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
