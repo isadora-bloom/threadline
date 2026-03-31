@@ -1887,6 +1887,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         .from('intelligence_queue')
         .select('*', { count: 'exact' })
         .eq('queue_type', 'entity_crossmatch')
+        .neq('status', 'dismissed')
         .order('priority_score', { ascending: false })
         .range(page * 50, (page + 1) * 50 - 1)
       if (error) return { items: [], total: 0 }
