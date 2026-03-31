@@ -92,26 +92,26 @@ export default function IntelligencePage() {
   // Offender overlaps + stalls are stored under Doe Network case
   const offenderCaseId = doeMissingCase?.id ?? caseId
 
-  // Stats from the actual matcher tables (not the rule-based queue)
+  // Stats — avoid counting huge tables (doe_match_candidates has millions of rows)
+  // Only count filtered subsets that won't time out
   const { data: stats } = useQuery({
     queryKey: ['intelligence-stats'],
     queryFn: async () => {
-      const [doeAll, doeStrong, offenders, stalledCases, importTotal, importProcessed, settingsRes] = await Promise.all([
-        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }),
-        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }).in('grade', ['strong', 'very_strong']),
-        supabase.from('offender_case_overlaps').select('id', { count: 'exact', head: true }).gte('composite_score', 65),
+      const [doeVeryStrong, stalledCases, importTotal, clusters, entityMentions, settingsRes] = await Promise.all([
+        supabase.from('doe_match_candidates').select('id', { count: 'exact', head: true }).eq('grade', 'very_strong'),
         supabase.from('doe_stall_flags').select('id', { count: 'exact', head: true }),
         supabase.from('import_records').select('id', { count: 'exact', head: true }),
-        supabase.from('import_records').select('id', { count: 'exact', head: true }).eq('ai_processed', true),
+        supabase.from('doe_victimology_clusters').select('id', { count: 'exact', head: true }),
+        supabase.from('doe_entity_mentions').select('id', { count: 'exact', head: true }),
         caseId ? supabase.from('case_pattern_settings').select('updated_at').eq('case_id', caseId).single() : Promise.resolve({ data: null }),
       ])
       return {
-        doe_total: doeAll.count ?? 0,
-        doe_strong: doeStrong.count ?? 0,
-        offender_overlaps: offenders.count ?? 0,
+        doe_total: doeVeryStrong.count ?? 0,
+        doe_strong: doeVeryStrong.count ?? 0,
         stalled_cases: stalledCases.count ?? 0,
         registry_total: importTotal.count ?? 0,
-        registry_processed: importProcessed.count ?? 0,
+        clusters: clusters.count ?? 0,
+        entity_mentions: entityMentions.count ?? 0,
         last_analyzed: settingsRes.data?.updated_at ?? null,
       }
     },
@@ -244,28 +244,28 @@ export default function IntelligencePage() {
 
       {/* Summary stats */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-sm font-medium text-slate-500">DOE Matches</div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{(stats?.doe_total ?? 0).toLocaleString()}</div>
-          </CardContent>
-        </Card>
         <Card className={stats?.doe_strong ? 'border-indigo-200 bg-indigo-50' : ''}>
           <CardContent className="p-4">
-            <div className="text-sm font-medium text-indigo-600">Strong+</div>
+            <div className="text-sm font-medium text-indigo-600">Very Strong Matches</div>
             <div className="text-2xl font-bold text-indigo-800 mt-1">{(stats?.doe_strong ?? 0).toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="text-sm font-medium text-slate-500">Offender Overlaps</div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{(stats?.offender_overlaps ?? 0).toLocaleString()}</div>
+            <div className="text-sm font-medium text-slate-500">Clusters</div>
+            <div className="text-2xl font-bold text-slate-900 mt-1">{(stats?.clusters ?? 0).toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm font-medium text-slate-500">Stalled Cases</div>
             <div className="text-2xl font-bold text-slate-900 mt-1">{stats?.stalled_cases ?? 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm font-medium text-slate-500">Entities</div>
+            <div className="text-2xl font-bold text-slate-900 mt-1">{(stats?.entity_mentions ?? 0).toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>

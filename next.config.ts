@@ -10,7 +10,7 @@ const ContentSecurityPolicy = [
   `script-src 'self' ${isDev ? "'unsafe-eval'" : ''} 'unsafe-inline' https://api.mapbox.com`,
   `worker-src blob:`,
   `child-src blob:`,
-  `img-src 'self' data: blob: https://*.supabase.co https://*.mapbox.com`,
+  `img-src 'self' data: blob: https://*.supabase.co https://*.mapbox.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.openstreetmap.org`,
   `style-src 'self' 'unsafe-inline' https://api.mapbox.com https://fonts.googleapis.com https://fonts.gstatic.com`,
   `font-src 'self' https://fonts.gstatic.com`,
   `frame-ancestors 'none'`,
