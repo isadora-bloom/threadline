@@ -8,6 +8,6 @@ export default async function RootPage() {
   if (user) {
     redirect('/intelligence')
   } else {
-    redirect('/login')
+    redirect('/landing')
   }
 }

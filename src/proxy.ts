@@ -34,7 +34,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Public routes — no auth required
-  const publicRoutes = ['/login', '/auth/callback', '/terms', '/accept-terms', '/privacy']
+  const publicRoutes = ['/login', '/auth/callback', '/terms', '/accept-terms', '/privacy', '/landing']
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route))
   const isSubmitRoute = pathname.startsWith('/submit/')
   const isApiSubmitRoute = pathname.startsWith('/api/submit')
