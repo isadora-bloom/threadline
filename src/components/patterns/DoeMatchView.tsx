@@ -1734,7 +1734,7 @@ function CaseComparisonModal({
 
 export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'matches' | 'clusters' | 'stalls' | 'entities' | 'route'>('matches')
+  const [activeTab, setActiveTab] = useState<'matches' | 'clusters' | 'stalls' | 'entities' | 'route' | 'tattoo_matches'>('matches')
   const [gradeFilter, setGradeFilter] = useState('very_strong')
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(0)
@@ -1875,6 +1875,23 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
       return await res.json() as { matches: DoeMatchCandidate[]; total: number }
     },
     enabled: activeTab === 'route',
+    retry: false,
+  })
+
+  // Fetch tattoo matches from intelligence queue
+  const tattooMatchQuery = useQuery({
+    queryKey: ['tattoo-matches', page],
+    queryFn: async () => {
+      const { data, count, error } = await supabase
+        .from('intelligence_queue')
+        .select('*', { count: 'exact' })
+        .eq('queue_type', 'entity_crossmatch')
+        .order('priority_score', { ascending: false })
+        .range(page * 50, (page + 1) * 50 - 1)
+      if (error) return { items: [], total: 0 }
+      return { items: data ?? [], total: count ?? 0 }
+    },
+    enabled: activeTab === 'tattoo_matches',
     retry: false,
   })
 
@@ -2526,6 +2543,7 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
         {[
           { id: 'matches'  as const, label: 'Missing ↔ Unidentified', count: totalMatches },
           { id: 'route'    as const, label: 'Route Matches',            count: routeMatchQuery.data?.total ?? 0 },
+          { id: 'tattoo_matches' as const, label: 'Tattoo Matches',    count: tattooMatchQuery.data?.total ?? 0 },
           { id: 'clusters' as const, label: 'Clusters',                count: totalClusters },
           { id: 'stalls'   as const, label: 'Stall Flags',             count: totalStalls },
           { id: 'entities' as const, label: 'Entity Cross-Match',      count: totalEntities },
@@ -3206,6 +3224,102 @@ export function DoeMatchView({ caseId, canManage }: DoeMatchViewProps) {
           )}
         </>
       )}
+
+      {activeTab === 'tattoo_matches' && (
+        <>
+          <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4">
+            <Fingerprint className="h-3.5 w-3.5 text-purple-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-[11px] text-purple-700">
+                Tattoo matches compare distinguishing mark descriptions (tattoos, scars, birthmarks) between missing persons
+                and unidentified remains. Matches are scored by shared keywords and body location alignment.
+                <strong> Description + same body location = strongest signal.</strong>
+              </p>
+            </div>
+          </div>
+
+          {tattooMatchQuery.isLoading ? (
+            <div className="py-8 text-center"><Loader2 className="h-5 w-5 animate-spin text-slate-400 mx-auto" /></div>
+          ) : (tattooMatchQuery.data?.items ?? []).length === 0 ? (
+            <div className="py-10 text-center space-y-2">
+              <Fingerprint className="h-8 w-8 text-slate-200 mx-auto" />
+              <p className="text-sm text-slate-400">No tattoo matches found.</p>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Run the tattoo matching script to compare mark descriptions across all cases.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(tattooMatchQuery.data?.items ?? []).map((item: Record<string, unknown>) => {
+                const details = item.details as Record<string, unknown> | null
+                const score = item.priority_score as number
+                const locMatch = details?.location_match as boolean
+
+                return (
+                  <div key={item.id as string} className={`p-3 rounded-lg border ${
+                    locMatch ? 'border-purple-300 bg-purple-50' : 'border-slate-200 bg-slate-50'
+                  }`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold ${
+                          score >= 80 ? 'bg-purple-200 text-purple-900' :
+                          score >= 60 ? 'bg-amber-200 text-amber-900' :
+                          'bg-slate-200 text-slate-700'
+                        }`}>
+                          {score}
+                        </span>
+                        {locMatch && (
+                          <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
+                            SAME BODY LOCATION
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-500">
+                          {(details?.strength as string) === 'description_and_location' ? 'Description + Location' : 'Description only'}
+                        </span>
+                      </div>
+                    </div>
+                    <h4 className="text-sm font-semibold text-slate-900 mb-1">
+                      {item.title as string}
+                    </h4>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {((details?.shared_keywords ?? []) as string[]).map((kw: string, i: number) => (
+                        <span key={i} className="px-1.5 py-0.5 bg-purple-100 text-purple-800 text-[10px] font-medium rounded">
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[10px]">
+                      <div>
+                        <span className="font-semibold text-blue-600">Missing:</span>
+                        <p className="text-slate-600 mt-0.5 line-clamp-3">{details?.missing_mark as string}</p>
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-500">Unidentified:</span>
+                        <p className="text-slate-600 mt-0.5 line-clamp-3">{details?.unidentified_mark as string}</p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {(tattooMatchQuery.data?.total ?? 0) > 50 && (
+            <div className="flex items-center justify-between pt-2">
+              <p className="text-xs text-slate-400">
+                Page {page + 1} of {Math.ceil((tattooMatchQuery.data?.total ?? 0) / 50)}
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page === 0}
+                  onClick={() => setPage(p => p - 1)}>Previous</Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs"
+                  disabled={(page + 1) * 50 >= (tattooMatchQuery.data?.total ?? 0)}
+                  onClick={() => setPage(p => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       <CaseComparisonModal
         open={compareOpen}
         onClose={() => setCompareOpen(false)}
