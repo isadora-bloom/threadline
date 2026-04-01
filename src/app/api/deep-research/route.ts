@@ -498,131 +498,48 @@ Use these web results to enrich your analysis. Cite specific sources when refere
 
 ## YOUR OUTPUT
 
-Produce your analysis as JSON. Be the investigator this case deserves. Be specific. Be honest about what you don't know. Name the databases, the courthouses, the newspaper archives. If you think the classification is wrong, say so and say why. If you think there's a connection to another case, explain the chain of reasoning — don't just cite demographic overlap.
+Produce your analysis as JSON. Be specific. Be honest. The humans reading this will act on what you write.
 
-Every assertion needs a confidence tag. "High" means the evidence directly supports it. "Medium" means it's a reasonable inference from available data. "Low" means it's a possibility worth checking but could easily be wrong. If something is speculative, label it speculative. The humans reading this will act on what you write. Do not give them false confidence.
+IMPORTANT: Keep the JSON compact. Do not write long paragraphs in each field. Be concise — 1-2 sentences per item.
 
 {
-  "executive_summary": "The single most important paragraph about this case. What happened? What was missed? What should happen next? Write this as if briefing a detective who has 60 seconds.",
-
-  "known_facts": [
-    "List ONLY what is established. Separate fact from assumption. If the database says 'runaway' that is a CLASSIFICATION, not a fact."
-  ],
-
-  "working_theory": {
-    "primary": "The most plausible explanation given all available evidence. State your reasoning.",
-    "alternative": "The explanation that would be true if your primary theory is wrong. Investigators who only pursue one theory miss the truth.",
-    "confidence": "low|medium|high"
-  },
-
-  "timeline_reconstruction": [
-    {
-      "date": "YYYY-MM-DD or best estimate",
-      "time_of_day": "morning|afternoon|evening|night|unknown",
-      "event": "What happened, as specifically as possible",
-      "source": "Where this information comes from",
-      "confidence": "low|medium|high",
-      "gaps": "What's missing between this event and the next? How long is the gap? What should have happened in that gap?"
-    }
-  ],
+  "executive_summary": "What happened, what was missed, what should happen next. 3-4 sentences max.",
 
   "connections": [
-    {
-      "name": "Connected case or person",
-      "record_id": "UUID if available, null otherwise",
-      "connection_strength": 0-100,
-      "reasoning": "The specific chain of logic connecting these cases. Not 'both female' — that's noise. What is the actual thread?",
-      "independent_signals": ["list each signal that independently supports this connection"],
-      "confidence": "low|medium|high",
-      "what_would_confirm": "What single piece of evidence would confirm or eliminate this connection?"
-    }
-  ],
-
-  "offender_analysis": [
-    {
-      "offender_name": "Name",
-      "overlap_strength": 0-100,
-      "reasoning": "Detailed reasoning — why this offender, specifically? Walk through their MO, geography, victim profile, timeline.",
-      "matching_signals": ["Each matching signal with explanation"],
-      "contradicting_signals": ["Each signal that argues AGAINST this match — be honest"],
-      "temporal_feasibility": "Was this offender active and free during the relevant period?",
-      "confidence": "low|medium|high"
-    }
-  ],
-
-  "geographic_analysis": {
-    "primary_location_significance": "What is significant about where this person was last seen or found? What's nearby? What routes pass through?",
-    "corridor_patterns": ["Any highway or travel route patterns involving this and other cases"],
-    "terrain_analysis": "If remains: why this specific location? Accessible by vehicle? Remote? Visible from road? Near water?",
-    "jurisdiction_note": "Which law enforcement agency has jurisdiction? Are there overlapping jurisdictions that could cause confusion?"
-  },
-
-  "classification_review": {
-    "current_classification": "What the case is currently classified as",
-    "assessment": "Is this classification justified by the evidence? Or was it a convenience?",
-    "reclassification_recommended": true/false,
-    "recommended_classification": "What it should be, if different",
-    "reasoning": "Why the current classification may be wrong — specific evidence"
-  },
-
-  "investigative_failures": [
-    {
-      "failure": "What specifically was not done",
-      "impact": "How this failure affected the case",
-      "still_recoverable": true/false,
-      "recovery_action": "What can still be done to compensate for this failure"
-    }
+    { "name": "case or person", "reasoning": "why connected — specific evidence", "confidence": "low|medium|high" }
   ],
 
   "next_steps": [
-    {
-      "priority": "critical|high|medium|low",
-      "action": "Specific, actionable instruction. Name the database. Name the courthouse. Name the type of record.",
-      "rationale": "Why this specific action, and what it could reveal",
-      "who": "law_enforcement|family|nonprofit|researcher|medical_examiner|journalist",
-      "estimated_difficulty": "simple|moderate|requires_authorization",
-      "potential_yield": "What finding this information could unlock"
-    }
+    { "priority": "critical|high|medium", "action": "specific instruction", "who": "law_enforcement|family|researcher" }
   ],
 
   "red_flags": [
-    {
-      "flag": "What is concerning",
-      "severity": "critical|high|medium",
-      "evidence": "The specific data points that triggered this flag",
-      "implication": "What this could mean if true"
-    }
+    { "flag": "what is concerning", "severity": "high|medium" }
   ],
 
-  "public_records_strategy": [
-    {
-      "source": "Specific database, archive, or record type (e.g., 'Rappahannock County Circuit Court records 1998-2002', 'Newspapers.com for Roanoke Times coverage', 'Virginia Unclaimed Property database')",
-      "what_to_search": "Exact search terms or criteria",
-      "what_you_might_find": "What a hit would mean for the case"
-    }
-  ],
+  "unanswered_questions": ["specific questions that would break the case"],
 
-  "unanswered_questions": [
-    "The specific questions that, if answered, would break this case open. Frame them as questions an investigator would ask."
-  ],
+  "classification_review": {
+    "assessment": "Is the classification justified?",
+    "recommendation": "what it should be if wrong"
+  },
 
-  "solvability_assessment": {
-    "score": 0-100,
-    "grade": "high|moderate|low|uncertain",
-    "reasoning": "What makes this case solvable or unsolvable? Be honest.",
-    "best_chance": "The single most promising avenue for resolution",
-    "biggest_obstacle": "The single biggest thing standing in the way"
-  }
+  "web_findings": [
+    { "source": "url or source name", "finding": "what was found" }
+  ]
 }
 
+Keep arrays to 3-5 items max. No nested objects beyond what's shown above.
+Do NOT include fields with no data — omit them entirely.
+Return ONLY the JSON, no markdown fences.
+
 CRITICAL RULES:
-- You are not writing a summary. You are conducting an investigation. Push on every detail.
-- When you see "voluntary" or "runaway" for a minor, treat it with extreme skepticism. Question who made that classification and why.
-- When you see remains found near a highway, check which offenders operated that corridor.
-- When you see a gap in the timeline, ask what filled that gap. Silence is a signal.
-- When you see a case with no DNA processing after 2000, flag it. That is a recoverable failure.
-- When you see similar cases in the same region and timeframe, name them explicitly. Do not just say "there are similar cases."
-- Do not pad your analysis with generic observations. Every sentence should contain information specific to THIS case.
+- If you see tattoo/mark matches in the data above, reference them specifically in connections.
+- If web search found news articles, cite them in web_findings.
+- If the classification seems wrong (runaway for someone with foul play indicators), flag it.
+- Do not pad with generic observations. Every sentence must be specific to THIS case.
+
+Previously this schema asked for 15 fields. We simplified to 7. Use the space to write better content, not more fields.`
 - If you don't have enough data to analyze something, say so directly rather than filling space with speculation.
 - Return only the JSON object, no markdown fences.`
 }
