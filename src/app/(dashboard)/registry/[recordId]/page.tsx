@@ -564,9 +564,15 @@ export default async function RegistryProfilePage({
                         {ai?.summary && (
                           <p className="text-xs text-slate-500 mt-1.5 italic">{ai.summary as string}</p>
                         )}
-                        {match.missing_marks && (match.missing_marks as string).length > 5 && (
-                          <p className="text-xs text-slate-500 mt-1">Marks: {(match.missing_marks as string).slice(0, 100)}</p>
-                        )}
+                        {/* Show the OTHER side's marks — when viewing a missing person, show unidentified marks */}
+                        {isMissing
+                          ? (match.unidentified_marks && (match.unidentified_marks as string).length > 5 && (
+                              <p className="text-xs text-purple-600 mt-1 bg-purple-50 p-1 rounded">Marks: {(match.unidentified_marks as string).slice(0, 150)}</p>
+                            ))
+                          : (match.missing_marks && (match.missing_marks as string).length > 5 && (
+                              <p className="text-xs text-purple-600 mt-1 bg-purple-50 p-1 rounded">Marks: {(match.missing_marks as string).slice(0, 150)}</p>
+                            ))
+                        }
                       </div>
                     )
                   })}
@@ -787,7 +793,9 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 function ResearchHistoryCard({ results }: { results: Array<Record<string, unknown>> }) {
-  const latest = results[0]
+  // Find the best completed result (not failed, not running, not parse_error)
+  const completed = results.filter(r => r.status === 'complete' && r.findings && !(r.findings as Record<string, unknown>)?._parse_error)
+  const latest = completed[0] ?? results.find(r => r.status === 'complete') ?? results[0]
   const findings = latest?.findings as Record<string, unknown> | undefined
 
   return (
@@ -795,10 +803,26 @@ function ResearchHistoryCard({ results }: { results: Array<Record<string, unknow
       <CardHeader className="pb-2">
         <CardTitle className="text-sm flex items-center gap-2">
           <Brain className="h-4 w-4" />
-          Research ({results.length})
+          Research ({results.length} run{results.length !== 1 ? 's' : ''})
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Run status summary */}
+        <div className="flex gap-1 flex-wrap">
+          {results.slice(0, 5).map((r, i) => (
+            <Badge key={i} variant="outline" className={`text-[10px] ${
+              r.status === 'complete' && !(r.findings as Record<string, unknown>)?._parse_error ? 'text-green-600 border-green-200' :
+              r.status === 'complete' ? 'text-amber-600 border-amber-200' :
+              r.status === 'running' ? 'text-blue-600 border-blue-200' :
+              'text-red-600 border-red-200'
+            }`}>
+              {r.status === 'complete' && (r.findings as Record<string, unknown>)?._parse_error ? 'truncated' : r.status as string}
+              {' · '}
+              {new Date(r.created_at as string).toLocaleDateString()}
+            </Badge>
+          ))}
+        </div>
+
         {/* Summary */}
         {latest?.summary && (
           <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
