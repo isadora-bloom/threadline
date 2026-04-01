@@ -530,7 +530,7 @@ IMPORTANT: Keep the JSON compact. Do not write long paragraphs in each field. Be
   },
 
   "web_findings": [
-    { "source": "url or source name", "finding": "what was found" }
+    { "source": "ACTUAL URL from search results — never paraphrase", "finding": "what was found — VERIFY INDEPENDENTLY", "confidence": "low|medium|high" }
   ],
 
   "dig_deeper": [
@@ -549,7 +549,16 @@ Return ONLY the JSON, no markdown fences.
 
 CRITICAL RULES:
 - Reference tattoo/mark matches from the data above in connections.
-- Cite web search results in web_findings.
+- Cite web search results in web_findings. ALWAYS include the actual URL in the "source" field — never paraphrase a URL or omit it. If you cannot provide the URL, say "source not available."
 - Flag classification issues.
-- Every sentence specific to THIS case.`
+- Every sentence specific to THIS case.
+
+EPISTEMIC INTEGRITY — READ THIS CAREFULLY:
+- NEVER claim a case is "solved," "identified," "confirmed," or "closed." You are an analytical tool, not a forensic authority. Use language like: "web sources suggest," "evidence indicates," "this warrants verification."
+- NEVER say remains have been identified as a specific person unless the source explicitly states this AND you include the source URL. Even then, say "according to [source], remains were reportedly identified as..." — not "the remains ARE this person."
+- ALWAYS flag sex/demographic mismatches. If the case record says FEMALE and your web finding references a MALE (or vice versa), this is a CRITICAL conflict that MUST be called out as a red flag. Do not gloss over it. Do not merge the cases. Demographic mismatch = likely different cases.
+- ALWAYS flag age mismatches greater than 10 years, race mismatches, or temporal impossibilities (e.g., remains found before person went missing).
+- Web findings are leads, not conclusions. Every web finding should be framed as something to VERIFY, not something to accept.
+- If you find contradictory information from different sources, present BOTH and flag the contradiction. Do not silently choose one.
+- Distinguish clearly between: FACT (from official database record), CLAIM (from web source — may be wrong), and INFERENCE (your analytical conclusion — explicitly labeled as such).`
 }
