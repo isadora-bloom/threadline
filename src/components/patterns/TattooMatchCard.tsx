@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { QuickWatch } from '@/components/registry/QuickWatch'
 import {
   Fingerprint,
   ChevronDown,
@@ -229,7 +230,10 @@ export function TattooMatchCard({
             <div className="grid grid-cols-2 gap-4">
               {/* Missing person */}
               <div className="space-y-2">
-                <h5 className="text-xs font-bold text-blue-600 uppercase tracking-wide">Missing Person</h5>
+                <div className="flex items-center justify-between">
+                  <h5 className="text-xs font-bold text-blue-600 uppercase tracking-wide">Missing Person</h5>
+                  <QuickWatch submissionId={details.missing_submission_id} size="xs" />
+                </div>
                 {missingDetail && (
                   <>
                     <div className="space-y-1 text-xs">
@@ -260,7 +264,10 @@ export function TattooMatchCard({
 
               {/* Unidentified remains */}
               <div className="space-y-2">
-                <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Unidentified Remains</h5>
+                <div className="flex items-center justify-between">
+                  <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Unidentified Remains</h5>
+                  <QuickWatch submissionId={details.unidentified_submission_id} size="xs" />
+                </div>
                 {unidentifiedDetail && (
                   <>
                     <div className="space-y-1 text-xs">
