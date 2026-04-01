@@ -49,8 +49,11 @@ export async function POST(req: NextRequest) {
     // Gather context for AI
     const context = await gatherResearchContext(serviceClient, record, importRecordId)
 
-    // Run AI analysis
-    const prompt = buildResearchPrompt(record, context)
+    // Web search — if Brave API key is available, search for additional context
+    const webResults = await runWebSearch(record)
+
+    // Run AI analysis with all context including web results
+    const prompt = buildResearchPrompt(record, context, webResults)
 
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -206,6 +209,66 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// ── Web Search via Brave ─────────────────────────────────────────────────────
+
+interface WebResult {
+  query: string
+  results: Array<{ title: string; url: string; description: string }>
+}
+
+async function runWebSearch(record: Record<string, unknown>): Promise<WebResult[]> {
+  const key = process.env.BRAVE_SEARCH_API_KEY
+  if (!key) return [] // no key = skip web search
+
+  const name = record.person_name as string | null
+  const state = record.state as string | null
+  const city = record.city as string | null
+  const dateMissing = record.date_missing as string | null
+
+  // Build targeted search queries
+  const queries: string[] = []
+  if (name) {
+    queries.push(`"${name}" missing person`)
+    if (state) queries.push(`"${name}" ${state} missing`)
+    if (city && state) queries.push(`"${name}" ${city} ${state}`)
+  }
+  if (name && dateMissing) {
+    const year = dateMissing.split('-')[0]
+    queries.push(`"${name}" missing ${year}`)
+  }
+  // Search for news coverage
+  if (name && state) {
+    queries.push(`"${name}" ${state} news case`)
+  }
+
+  const results: WebResult[] = []
+
+  for (const query of queries.slice(0, 4)) { // max 4 searches per research
+    try {
+      const res = await fetch(
+        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&safesearch=off`,
+        { headers: { Accept: 'application/json', 'X-Subscription-Token': key } }
+      )
+      if (!res.ok) continue
+      const data = await res.json()
+      const webResults = (data.web?.results ?? []).slice(0, 5).map((r: { title: string; url: string; description: string }) => ({
+        title: r.title,
+        url: r.url,
+        description: r.description,
+      }))
+      if (webResults.length > 0) {
+        results.push({ query, results: webResults })
+      }
+    } catch {
+      // silent — don't break research if search fails
+    }
+  }
+
+  return results
+}
+
+// ── Context Gathering ────────────────────────────────────────────────────────
+
 async function gatherResearchContext(
   supabase: Awaited<ReturnType<typeof createServiceClient>>,
   record: Record<string, unknown>,
@@ -305,7 +368,11 @@ function buildResearchPrompt(
     offenders: unknown[]
     queueItems: unknown[]
     solvability: unknown
-  }
+    doeMatches: unknown[]
+    tattooMatches: unknown[]
+    offenderOverlaps: unknown[]
+  },
+  webResults: WebResult[] = [],
 ) {
   const isMissing = record.record_type === 'missing_person'
   const extraction = record.ai_extraction as Record<string, unknown> | null
@@ -418,6 +485,14 @@ ${context.queueItems.length > 0 ? JSON.stringify(context.queueItems, null, 2) : 
 
 ## CURRENT SOLVABILITY ASSESSMENT
 ${context.solvability ? JSON.stringify(context.solvability, null, 2) : 'Not yet scored.'}
+
+${webResults.length > 0 ? `## WEB SEARCH RESULTS
+We searched the web for information about this case. Here is what we found:
+
+${webResults.map(wr => `Search: "${wr.query}"
+${wr.results.map(r => `- ${r.title} (${r.url})\n  ${r.description}`).join('\n')}`).join('\n\n')}
+
+Use these web results to enrich your analysis. Cite specific sources when referencing external information. Note any contradictions between web sources and database records.` : '## WEB SEARCH\nNo web search results available (Brave API key not configured or no relevant results found).'}
 
 ---
 
