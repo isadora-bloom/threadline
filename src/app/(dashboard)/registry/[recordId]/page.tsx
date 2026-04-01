@@ -767,37 +767,9 @@ export default async function RegistryProfilePage({
             </Card>
           )}
 
-          {/* Deep Research History */}
+          {/* Deep Research History — expandable */}
           {researchResults && researchResults.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Research History</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {researchResults.map((r) => (
-                    <div key={r.id} className="p-2 bg-slate-50 rounded-md">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className={`text-xs ${
-                          r.status === 'complete' ? 'text-green-600 border-green-200' :
-                          r.status === 'running' ? 'text-blue-600 border-blue-200' :
-                          r.status === 'failed' ? 'text-red-600 border-red-200' :
-                          ''
-                        }`}>
-                          {r.status}
-                        </Badge>
-                        <span className="text-xs text-slate-500">
-                          {new Date(r.created_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                      {r.summary && (
-                        <p className="text-xs text-slate-600 mt-1 line-clamp-3">{r.summary}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+            <ResearchHistoryCard results={researchResults as Array<Record<string, unknown>>} />
           )}
         </div>
       </div>
@@ -811,5 +783,91 @@ function Field({ label, value }: { label: string; value: string }) {
       <span className="text-xs font-medium text-slate-500">{label}</span>
       <p className="text-sm text-slate-800">{value}</p>
     </div>
+  )
+}
+
+function ResearchHistoryCard({ results }: { results: Array<Record<string, unknown>> }) {
+  const latest = results[0]
+  const findings = latest?.findings as Record<string, unknown> | undefined
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Brain className="h-4 w-4" />
+          Research ({results.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Summary */}
+        {latest?.summary && (
+          <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <p className="text-xs text-indigo-900 leading-relaxed">{latest.summary as string}</p>
+            <div className="text-[10px] text-indigo-500 mt-2">
+              {latest.model_used as string} · {new Date(latest.created_at as string).toLocaleDateString()}
+            </div>
+          </div>
+        )}
+
+        {/* Connections found */}
+        {findings?.connections && (findings.connections as unknown[]).length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold text-blue-700 mb-1">Connections Found</h4>
+            {(findings.connections as Array<Record<string, unknown>>).slice(0, 5).map((c, i) => (
+              <div key={i} className="p-2 bg-blue-50 rounded mb-1 text-xs text-blue-800">
+                <span className="font-medium">{c.name as string ?? 'Unknown'}</span>
+                {c.reasoning && <p className="text-blue-700 mt-0.5">{(c.reasoning as string).slice(0, 200)}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Next steps */}
+        {findings?.next_steps && (findings.next_steps as unknown[]).length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold text-green-700 mb-1">Recommended Next Steps</h4>
+            {(findings.next_steps as Array<Record<string, unknown>>).slice(0, 5).map((s, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs text-green-800 mb-1">
+                <span className="text-green-500 font-bold mt-0.5">{i + 1}.</span>
+                <div>
+                  <span className="font-medium">{s.action as string}</span>
+                  {s.rationale && <p className="text-green-600 text-[10px]">{s.rationale as string}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Red flags */}
+        {findings?.red_flags && (findings.red_flags as unknown[]).length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold text-red-700 mb-1">Red Flags</h4>
+            {(findings.red_flags as Array<Record<string, unknown>>).slice(0, 5).map((f, i) => (
+              <p key={i} className="text-xs text-red-700 mb-1">
+                ⚠ {(f.flag ?? f.description) as string}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {/* Unanswered questions */}
+        {findings?.unanswered_questions && (findings.unanswered_questions as string[]).length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold text-amber-700 mb-1">Unanswered Questions</h4>
+            {(findings.unanswered_questions as string[]).slice(0, 5).map((q, i) => (
+              <p key={i} className="text-xs text-amber-700 mb-1">? {q}</p>
+            ))}
+          </div>
+        )}
+
+        {/* Classification review */}
+        {findings?.classification_review && (findings.classification_review as Record<string, unknown>)?.assessment && (
+          <div className="p-2 bg-amber-50 border border-amber-200 rounded">
+            <h4 className="text-xs font-semibold text-amber-800 mb-1">Classification Review</h4>
+            <p className="text-xs text-amber-700">{(findings.classification_review as Record<string, unknown>).assessment as string}</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

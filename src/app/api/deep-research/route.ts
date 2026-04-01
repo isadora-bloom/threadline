@@ -247,12 +247,53 @@ async function gatherResearchContext(
     .eq('import_record_id', recordId)
     .single()
 
+  // 6. DOE match candidates (the real 16-signal matches)
+  const submissionId = record.submission_id as string | null
+  let doeMatches: unknown[] = []
+  if (submissionId) {
+    const isMissing = record.record_type === 'missing_person'
+    const col = isMissing ? 'missing_submission_id' : 'unidentified_submission_id'
+    const { data } = await supabase
+      .from('doe_match_candidates')
+      .select('composite_score, grade, missing_name, missing_location, missing_date, missing_marks, unidentified_location, unidentified_date, unidentified_marks, ai_assessment')
+      .eq(col, submissionId)
+      .order('composite_score', { ascending: false })
+      .limit(10)
+    doeMatches = data ?? []
+  }
+
+  // 7. Tattoo/mark matches from intelligence queue
+  const { data: tattooMatches } = await supabase
+    .from('intelligence_queue')
+    .select('title, summary, priority_score, details')
+    .eq('queue_type', 'entity_crossmatch')
+    .neq('status', 'dismissed')
+    .contains('related_submission_ids', submissionId ? [submissionId] : [])
+    .order('priority_score', { ascending: false })
+    .limit(10)
+
+  // 8. Offender overlaps for this submission
+  let offenderOverlaps: unknown[] = []
+  if (submissionId) {
+    const { data } = await supabase
+      .from('offender_case_overlaps')
+      .select('composite_score, matched_mo_keywords, ai_assessment, offender_id')
+      .eq('submission_id', submissionId)
+      .gte('composite_score', 65)
+      .order('composite_score', { ascending: false })
+      .limit(5)
+    offenderOverlaps = data ?? []
+  }
+
   return {
     connections: connections ?? [],
     similar: similar ?? [],
     offenders: offenders ?? [],
     queueItems: queueItems ?? [],
     solvability,
+    doeMatches,
+    tattooMatches: tattooMatches ?? [],
+    offenderOverlaps,
   }
 }
 
@@ -355,6 +396,22 @@ ${context.offenders.length > 0 ? JSON.stringify(context.offenders.slice(0, 25).m
     active_period: [o.active_from, o.active_to],
     incarcerated: [o.incarcerated_from, o.incarcerated_to],
   })), null, 2) : 'None in database.'}
+
+## DOE MATCH CANDIDATES (${context.doeMatches.length} from 16-signal matcher)
+${context.doeMatches.length > 0 ? JSON.stringify(context.doeMatches, null, 2) : 'No DOE matches found for this case.'}
+
+## TATTOO/MARK MATCHES (${context.tattooMatches.length})
+${context.tattooMatches.length > 0 ? JSON.stringify(context.tattooMatches.map((t: Record<string, unknown>) => ({
+    score: t.priority_score,
+    title: t.title,
+    shared_keywords: (t.details as Record<string, unknown>)?.shared_keywords,
+    location_match: (t.details as Record<string, unknown>)?.location_match,
+    missing_mark: (t.details as Record<string, unknown>)?.missing_mark,
+    unidentified_mark: (t.details as Record<string, unknown>)?.unidentified_mark,
+  })), null, 2) : 'No tattoo matches found.'}
+
+## OFFENDER OVERLAPS FOR THIS CASE (${context.offenderOverlaps.length})
+${context.offenderOverlaps.length > 0 ? JSON.stringify(context.offenderOverlaps, null, 2) : 'No offender overlaps for this case.'}
 
 ## EXISTING FLAGS ON THIS CASE (${context.queueItems.length})
 ${context.queueItems.length > 0 ? JSON.stringify(context.queueItems, null, 2) : 'None — no automated flags have been raised.'}
