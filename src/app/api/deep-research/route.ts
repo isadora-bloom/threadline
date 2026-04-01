@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { importRecordId, researchType = 'full' } = await req.json()
+  const { importRecordId, researchType = 'full', focusQuestion, focusSearchTerms } = await req.json()
   if (!importRecordId) return NextResponse.json({ error: 'importRecordId required' }, { status: 400 })
 
   const serviceClient = await createServiceClient()
@@ -50,10 +50,13 @@ export async function POST(req: NextRequest) {
     const context = await gatherResearchContext(serviceClient, record, importRecordId)
 
     // Web search — if Brave API key is available, search for additional context
-    const webResults = await runWebSearch(record)
+    const webResults = await runWebSearch(record, focusSearchTerms)
 
-    // Run AI analysis with all context including web results
-    const prompt = buildResearchPrompt(record, context, webResults)
+    // Build prompt — add focus question if this is a follow-up
+    let prompt = buildResearchPrompt(record, context, webResults)
+    if (focusQuestion) {
+      prompt += `\n\n## FOCUS QUESTION\nThis is a follow-up investigation. Focus your analysis specifically on:\n"${focusQuestion}"\n${focusSearchTerms ? `Search terms suggested: ${focusSearchTerms}` : ''}\nStill return the same JSON format, but weight your analysis toward answering this specific question.`
+    }
 
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -216,7 +219,7 @@ interface WebResult {
   results: Array<{ title: string; url: string; description: string }>
 }
 
-async function runWebSearch(record: Record<string, unknown>): Promise<WebResult[]> {
+async function runWebSearch(record: Record<string, unknown>, focusTerms?: string): Promise<WebResult[]> {
   const key = process.env.BRAVE_SEARCH_API_KEY
   if (!key) return [] // no key = skip web search
 
@@ -227,18 +230,20 @@ async function runWebSearch(record: Record<string, unknown>): Promise<WebResult[
 
   // Build targeted search queries
   const queries: string[] = []
+
+  // If this is a follow-up with specific search terms, use those first
+  if (focusTerms) {
+    queries.push(focusTerms)
+    if (name) queries.push(`"${name}" ${focusTerms}`)
+  }
+
   if (name) {
     queries.push(`"${name}" missing person`)
     if (state) queries.push(`"${name}" ${state} missing`)
-    if (city && state) queries.push(`"${name}" ${city} ${state}`)
   }
   if (name && dateMissing) {
     const year = dateMissing.split('-')[0]
     queries.push(`"${name}" missing ${year}`)
-  }
-  // Search for news coverage
-  if (name && state) {
-    queries.push(`"${name}" ${state} news case`)
   }
 
   const results: WebResult[] = []
@@ -526,20 +531,25 @@ IMPORTANT: Keep the JSON compact. Do not write long paragraphs in each field. Be
 
   "web_findings": [
     { "source": "url or source name", "finding": "what was found" }
+  ],
+
+  "dig_deeper": [
+    { "title": "short title for the investigation", "question": "specific research question the AI would investigate next", "search_terms": "what to search for" }
   ]
 }
 
-Keep arrays to 3-5 items max. No nested objects beyond what's shown above.
-Do NOT include fields with no data — omit them entirely.
+The dig_deeper array is REQUIRED — always include exactly 3 items. Each should be a specific, actionable follow-up investigation that would yield new information about this case. Examples:
+- "Search for news coverage of disappearance in local Raleigh newspapers 1985-1986"
+- "Check if NamUs UP55089 tattoo matches this person's known tattoo description"
+- "Search court records for restraining orders involving the stepfather"
+
+Keep all arrays to 3-5 items max. 1-2 sentences per item.
+Do NOT include fields with no data — omit them entirely (except dig_deeper which is required).
 Return ONLY the JSON, no markdown fences.
 
 CRITICAL RULES:
-- If you see tattoo/mark matches in the data above, reference them specifically in connections.
-- If web search found news articles, cite them in web_findings.
-- If the classification seems wrong (runaway for someone with foul play indicators), flag it.
-- Do not pad with generic observations. Every sentence must be specific to THIS case.
-
-Previously this schema asked for 15 fields. We simplified to 7. Use the space to write better content, not more fields.`
-- If you don't have enough data to analyze something, say so directly rather than filling space with speculation.
-- Return only the JSON object, no markdown fences.`
+- Reference tattoo/mark matches from the data above in connections.
+- Cite web search results in web_findings.
+- Flag classification issues.
+- Every sentence specific to THIS case.`
 }

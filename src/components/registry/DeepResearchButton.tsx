@@ -200,6 +200,71 @@ export function DeepResearchButton({ recordId, isWatching = false }: { recordId:
                   </>
                 )}
 
+                {/* Dig Deeper — follow-up investigations */}
+                {result.findings?.dig_deeper && (result.findings.dig_deeper as unknown[]).length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-indigo-900 mb-2">Dig Deeper</h3>
+                    <div className="space-y-2">
+                      {(result.findings.dig_deeper as Array<{ title?: string; question?: string; search_terms?: string }>).map((item, i) => (
+                        <div key={i} className="flex items-start gap-2 p-2 bg-indigo-50 border border-indigo-200 rounded-md">
+                          <div className="flex-1">
+                            <p className="text-xs font-semibold text-indigo-900">{item.title ?? `Follow-up ${i + 1}`}</p>
+                            <p className="text-xs text-indigo-700 mt-0.5">{item.question}</p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[10px] border-indigo-300 text-indigo-700 hover:bg-indigo-100 flex-shrink-0"
+                            disabled={loading}
+                            onClick={async () => {
+                              setLoading(true)
+                              setResult(null)
+                              try {
+                                const res = await fetch('/api/deep-research', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    importRecordId: recordId,
+                                    researchType: 'full',
+                                    focusQuestion: item.question,
+                                    focusSearchTerms: item.search_terms,
+                                  }),
+                                })
+                                const data = await res.json()
+                                if (!res.ok) {
+                                  setResult({ status: 'failed', summary: data.error ?? 'Research failed' })
+                                } else {
+                                  setResult(data)
+                                }
+                              } catch {
+                                setResult({ status: 'failed', summary: 'Network error' })
+                              } finally {
+                                setLoading(false)
+                              }
+                            }}
+                          >
+                            Go
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Web findings */}
+                {result.findings?.web_findings && (result.findings.web_findings as unknown[]).length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900 mb-2">Web Sources</h3>
+                    <div className="space-y-1">
+                      {(result.findings.web_findings as Array<{ source?: string; finding?: string }>).map((wf, i) => (
+                        <div key={i} className="text-xs text-slate-600">
+                          <span className="font-medium text-slate-700">{wf.source}:</span> {wf.finding}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
                   AI-generated research — all findings require human verification before action.
                 </div>
