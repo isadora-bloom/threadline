@@ -778,7 +778,7 @@ export default async function RegistryProfilePage({
 
           {/* Deep Research History — expandable */}
           {researchResults && researchResults.length > 0 && (
-            <ResearchHistoryCard results={researchResults as Array<Record<string, unknown>>} />
+            <ResearchHistoryCard results={researchResults as Array<Record<string, unknown>>} recordId={recordId} />
           )}
         </div>
       </div>

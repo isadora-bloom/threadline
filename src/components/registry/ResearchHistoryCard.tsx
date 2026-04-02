@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Brain, ChevronDown, ChevronUp } from 'lucide-react'
+import { Brain, ChevronDown, ChevronUp, Loader2, Search, Shield, Users, Sparkles } from 'lucide-react'
 
 const PREVIEW_COUNT = 3
 
@@ -37,7 +38,99 @@ function ExpandableSection({
   )
 }
 
-export function ResearchHistoryCard({ results }: { results: Array<Record<string, unknown>> }) {
+// Small "Go" button for AI-actionable items
+function AiGoButton({
+  recordId,
+  question,
+  searchTerms,
+  onComplete,
+}: {
+  recordId: string
+  question: string
+  searchTerms?: string
+  onComplete: () => void
+}) {
+  const [running, setRunning] = useState(false)
+
+  const handleGo = async () => {
+    setRunning(true)
+    try {
+      const res = await fetch('/api/deep-research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          importRecordId: recordId,
+          researchType: 'full',
+          focusQuestion: question,
+          focusSearchTerms: searchTerms,
+        }),
+      })
+      await res.json()
+      onComplete()
+    } catch {
+      // silent
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={handleGo}
+      disabled={running}
+      title="AI will investigate this"
+      className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
+    >
+      {running ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <Sparkles className="h-3 w-3" />
+      )}
+      {running ? 'Researching...' : 'Go'}
+    </button>
+  )
+}
+
+// Icon for who should action this
+function WhoIcon({ who }: { who: string }) {
+  if (who === 'law_enforcement') {
+    return (
+      <span title="Law enforcement action" className="flex items-center gap-0.5 text-[10px] text-slate-400">
+        <Shield className="h-3 w-3" /> LE
+      </span>
+    )
+  }
+  if (who === 'family') {
+    return (
+      <span title="Family action" className="flex items-center gap-0.5 text-[10px] text-slate-400">
+        <Users className="h-3 w-3" /> Family
+      </span>
+    )
+  }
+  if (who === 'researcher') {
+    return (
+      <span title="Researcher action" className="flex items-center gap-0.5 text-[10px] text-indigo-500">
+        <Search className="h-3 w-3" /> Researcher
+      </span>
+    )
+  }
+  return null
+}
+
+// Determine if a next step can be AI-investigated
+function isAiActionable(who?: string, action?: string): boolean {
+  if (who === 'researcher') return true
+  // Some actions are clearly human-only
+  if (who === 'law_enforcement' || who === 'family') return false
+  // If no "who" specified, check the action text
+  if (!action) return false
+  const humanKeywords = ['interview', 'obtain', 'request', 'collect', 'visit', 'contact', 'call', 'arrest', 'subpoena', 'testify', 'dna sample']
+  const lower = action.toLowerCase()
+  return !humanKeywords.some(k => lower.includes(k))
+}
+
+export function ResearchHistoryCard({ results, recordId }: { results: Array<Record<string, unknown>>; recordId: string }) {
+  const router = useRouter()
   const [showAllRuns, setShowAllRuns] = useState(false)
 
   const completed = results.filter(r => r.status === 'complete' && r.findings && !(r.findings as Record<string, unknown>)?._parse_error)
@@ -45,6 +138,10 @@ export function ResearchHistoryCard({ results }: { results: Array<Record<string,
   const findings = latest?.findings as Record<string, unknown> | undefined
 
   const visibleRuns = showAllRuns ? results : results.slice(0, 5)
+
+  const handleResearchComplete = () => {
+    router.refresh()
+  }
 
   return (
     <Card>
@@ -97,17 +194,26 @@ export function ResearchHistoryCard({ results }: { results: Array<Record<string,
               items={findings.connections as unknown[]}
               renderItem={(item, i) => {
                 const c = item as Record<string, unknown>
+                const connectionName = (c.name as string) ?? 'Unknown'
                 return (
                   <div key={i} className="p-2 bg-blue-50 rounded mb-1 text-xs text-blue-800">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{c.name as string ?? 'Unknown'}</span>
-                      {c.confidence && (
-                        <span className={`text-[10px] px-1 py-0.5 rounded ${
-                          c.confidence === 'high' ? 'bg-blue-200 text-blue-900' :
-                          c.confidence === 'medium' ? 'bg-blue-100 text-blue-700' :
-                          'bg-slate-100 text-slate-600'
-                        }`}>{c.confidence as string}</span>
-                      )}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-medium">{connectionName}</span>
+                        {c.confidence && (
+                          <span className={`text-[10px] px-1 py-0.5 rounded ${
+                            c.confidence === 'high' ? 'bg-blue-200 text-blue-900' :
+                            c.confidence === 'medium' ? 'bg-blue-100 text-blue-700' :
+                            'bg-slate-100 text-slate-600'
+                          }`}>{c.confidence as string}</span>
+                        )}
+                      </div>
+                      <AiGoButton
+                        recordId={recordId}
+                        question={`Investigate the connection between this case and ${connectionName}. ${c.reasoning ?? ''}`}
+                        searchTerms={`"${connectionName}" missing person unidentified`}
+                        onComplete={handleResearchComplete}
+                      />
                     </div>
                     {c.reasoning && <p className="text-blue-700 mt-0.5">{c.reasoning as string}</p>}
                   </div>
@@ -125,14 +231,28 @@ export function ResearchHistoryCard({ results }: { results: Array<Record<string,
               items={findings.next_steps as unknown[]}
               renderItem={(item, i) => {
                 const s = item as Record<string, unknown>
+                const action = s.action as string
+                const who = s.who as string | undefined
+                const canAiDo = isAiActionable(who, action)
+
                 return (
-                  <div key={i} className="flex items-start gap-2 text-xs text-green-800 mb-1">
+                  <div key={i} className="flex items-start gap-2 text-xs text-green-800 mb-1.5">
                     <span className="text-green-500 font-bold mt-0.5">{i + 1}.</span>
-                    <div>
-                      <span className="font-medium">{s.action as string}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium">{action}</span>
                       {s.rationale && <p className="text-green-600 text-[10px]">{s.rationale as string}</p>}
-                      {s.who && <p className="text-green-500 text-[10px]">For: {s.who as string}</p>}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {who && <WhoIcon who={who} />}
+                      </div>
                     </div>
+                    {canAiDo && (
+                      <AiGoButton
+                        recordId={recordId}
+                        question={action}
+                        searchTerms={action.slice(0, 100)}
+                        onComplete={handleResearchComplete}
+                      />
+                    )}
                   </div>
                 )
               }}
@@ -165,9 +285,20 @@ export function ResearchHistoryCard({ results }: { results: Array<Record<string,
             <h4 className="text-xs font-semibold text-amber-700 mb-1">Unanswered Questions</h4>
             <ExpandableSection
               items={findings.unanswered_questions as unknown[]}
-              renderItem={(item, i) => (
-                <p key={i} className="text-xs text-amber-700 mb-1">? {item as string}</p>
-              )}
+              renderItem={(item, i) => {
+                const question = item as string
+                return (
+                  <div key={i} className="flex items-start justify-between gap-2 mb-1">
+                    <p className="text-xs text-amber-700 flex-1">? {question}</p>
+                    <AiGoButton
+                      recordId={recordId}
+                      question={question}
+                      searchTerms={question.slice(0, 80)}
+                      onComplete={handleResearchComplete}
+                    />
+                  </div>
+                )
+              }}
             />
           </div>
         )}
@@ -180,9 +311,15 @@ export function ResearchHistoryCard({ results }: { results: Array<Record<string,
               items={findings.web_findings as unknown[]}
               renderItem={(item, i) => {
                 const w = item as Record<string, unknown>
+                const source = w.source as string
+                const isUrl = source?.startsWith('http')
                 return (
                   <div key={i} className="p-2 bg-slate-50 rounded mb-1 text-xs text-slate-700">
-                    <span className="font-medium">{w.source as string}</span>
+                    {isUrl ? (
+                      <a href={source} target="_blank" rel="noopener noreferrer" className="font-medium text-indigo-600 hover:underline break-all">{source}</a>
+                    ) : (
+                      <span className="font-medium">{source}</span>
+                    )}
                     {w.finding && <p className="text-slate-600 mt-0.5">{w.finding as string}</p>}
                   </div>
                 )
@@ -198,6 +335,14 @@ export function ResearchHistoryCard({ results }: { results: Array<Record<string,
             <p className="text-xs text-amber-700">{(findings.classification_review as Record<string, unknown>).assessment as string}</p>
           </div>
         )}
+
+        {/* Legend */}
+        <div className="flex items-center gap-3 pt-1 border-t border-slate-100 text-[10px] text-slate-400">
+          <span className="flex items-center gap-1"><Sparkles className="h-3 w-3 text-indigo-500" /> AI can investigate</span>
+          <span className="flex items-center gap-1"><Shield className="h-3 w-3" /> Law enforcement</span>
+          <span className="flex items-center gap-1"><Users className="h-3 w-3" /> Family</span>
+          <span className="flex items-center gap-1"><Search className="h-3 w-3" /> Researcher</span>
+        </div>
       </CardContent>
     </Card>
   )
