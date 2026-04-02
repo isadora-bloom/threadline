@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Brain, Loader2 } from 'lucide-react'
@@ -15,16 +16,27 @@ import {
 
 export function DeepResearchButton({ recordId, isWatching = false }: { recordId: string; isWatching?: boolean }) {
   const supabase = createClient()
+  const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [watchPrompt, setWatchPrompt] = useState(false)
   const [existingResearch, setExistingResearch] = useState<{ summary: string; created_at: string } | null>(null)
   const [checkedExisting, setCheckedExisting] = useState(false)
+  const [hasNewResults, setHasNewResults] = useState(false)
   const [result, setResult] = useState<{
     status: string
     summary?: string
     findings?: Record<string, unknown>
   } | null>(null)
   const [open, setOpen] = useState(false)
+
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    setOpen(isOpen)
+    // Refresh the page when dialog closes after new research was run
+    if (!isOpen && hasNewResults) {
+      router.refresh()
+      setHasNewResults(false)
+    }
+  }, [hasNewResults, router])
 
   const runResearch = async () => {
     setLoading(true)
@@ -45,6 +57,7 @@ export function DeepResearchButton({ recordId, isWatching = false }: { recordId:
       }
 
       setResult(data)
+      if (data.status !== 'failed') setHasNewResults(true)
     } catch (err) {
       setResult({ status: 'failed', summary: 'Network error' })
     } finally {
@@ -53,7 +66,7 @@ export function DeepResearchButton({ recordId, isWatching = false }: { recordId:
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Brain className="h-4 w-4" />
@@ -189,9 +202,10 @@ export function DeepResearchButton({ recordId, isWatching = false }: { recordId:
                       <div>
                         <h3 className="text-sm font-semibold text-red-700 mb-2">Red Flags</h3>
                         <div className="space-y-1">
-                          {(result.findings.red_flags as Array<{ description?: string; severity?: string }>).map((flag, i) => (
+                          {(result.findings.red_flags as Array<{ flag?: string; description?: string; severity?: string }>).map((f, i) => (
                             <p key={i} className="text-sm text-red-700">
-                              ⚠ {flag.description}
+                              {f.flag ?? f.description}
+                              {f.severity && <span className={`ml-1 text-xs ${f.severity === 'high' ? 'font-bold' : 'text-red-500'}`}>({f.severity})</span>}
                             </p>
                           ))}
                         </div>
@@ -235,6 +249,7 @@ export function DeepResearchButton({ recordId, isWatching = false }: { recordId:
                                   setResult({ status: 'failed', summary: data.error ?? 'Research failed' })
                                 } else {
                                   setResult(data)
+                                  setHasNewResults(true)
                                 }
                               } catch {
                                 setResult({ status: 'failed', summary: 'Network error' })

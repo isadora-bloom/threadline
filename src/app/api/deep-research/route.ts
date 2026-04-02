@@ -52,10 +52,12 @@ export async function POST(req: NextRequest) {
     // Web search — if Brave API key is available, search for additional context
     const webResults = await runWebSearch(record, focusSearchTerms)
 
-    // Build prompt — add focus question if this is a follow-up
-    let prompt = buildResearchPrompt(record, context, webResults)
+    // Build prompt — use focused prompt for follow-ups, full prompt for initial research
+    let prompt: string
     if (focusQuestion) {
-      prompt += `\n\n## FOCUS QUESTION\nThis is a follow-up investigation. Focus your analysis specifically on:\n"${focusQuestion}"\n${focusSearchTerms ? `Search terms suggested: ${focusSearchTerms}` : ''}\nStill return the same JSON format, but weight your analysis toward answering this specific question.`
+      prompt = buildFocusedPrompt(record, context, webResults, focusQuestion, focusSearchTerms)
+    } else {
+      prompt = buildResearchPrompt(record, context, webResults)
     }
 
     const response = await anthropic.messages.create({
@@ -561,4 +563,99 @@ EPISTEMIC INTEGRITY — READ THIS CAREFULLY:
 - Web findings are leads, not conclusions. Every web finding should be framed as something to VERIFY, not something to accept.
 - If you find contradictory information from different sources, present BOTH and flag the contradiction. Do not silently choose one.
 - Distinguish clearly between: FACT (from official database record), CLAIM (from web source — may be wrong), and INFERENCE (your analytical conclusion — explicitly labeled as such).`
+}
+
+// ── Focused Follow-up Prompt (for Dig Deeper) ──────────────────────────────
+
+function buildFocusedPrompt(
+  record: Record<string, unknown>,
+  context: Awaited<ReturnType<typeof gatherResearchContext>>,
+  webResults: WebResult[] = [],
+  focusQuestion: string,
+  focusSearchTerms?: string,
+) {
+  const isMissing = record.record_type === 'missing_person'
+
+  return `You are Threadline — a case intelligence engine. You are conducting a FOCUSED FOLLOW-UP investigation on a specific question about a ${isMissing ? 'missing person' : 'unidentified remains'} case.
+
+## YOUR MISSION
+
+Answer this specific question:
+"${focusQuestion}"
+${focusSearchTerms ? `\nSuggested search terms: ${focusSearchTerms}` : ''}
+
+This is NOT a general case review. Do NOT repeat the initial research. Focus ENTIRELY on investigating this specific question. Dig into the web results, cross-reference with the database, and provide NEW information that was not in the initial analysis.
+
+## TARGET CASE (for context only)
+
+Name: ${record.person_name ?? 'Unidentified'}
+Type: ${record.record_type}
+External ID: ${record.external_id}
+Sex: ${record.sex ?? 'Unknown'}
+Age: ${record.age_text ?? 'Unknown'}
+Race: ${record.race ?? 'Unknown'}
+Location: ${[record.city, record.state].filter(Boolean).join(', ') || 'Unknown'}
+Date: ${record.date_missing ?? record.date_found ?? 'Unknown'}
+
+## DOE MATCH CANDIDATES (${context.doeMatches.length})
+${context.doeMatches.length > 0 ? JSON.stringify(context.doeMatches.slice(0, 5), null, 2) : 'None.'}
+
+## REGIONAL CASES (${context.similar.length})
+${context.similar.length > 0 ? JSON.stringify(context.similar.slice(0, 10).map((s: Record<string, unknown>) => ({
+    name: s.person_name,
+    type: s.record_type,
+    sex: s.sex,
+    age: s.age_text,
+    state: s.state,
+    city: s.city,
+    date: s.date_missing ?? s.date_found,
+  })), null, 2) : 'None.'}
+
+${webResults.length > 0 ? `## WEB SEARCH RESULTS (critical — these are your primary new data)
+${webResults.map(wr => `Search: "${wr.query}"
+${wr.results.map(r => `- ${r.title} (${r.url})\n  ${r.description}`).join('\n')}`).join('\n\n')}
+
+Analyze these results carefully. Extract specific facts, dates, names, and details relevant to the focus question. Include actual URLs.` : '## WEB SEARCH\nNo web results found. Base your analysis on database records only.'}
+
+---
+
+## YOUR OUTPUT
+
+Produce JSON focused on answering the specific question above. Include ONLY findings relevant to that question — not a rehash of the general case analysis.
+
+{
+  "executive_summary": "Direct answer to the focus question. What did we find? 2-3 sentences.",
+
+  "connections": [
+    { "name": "case or person found relevant to the question", "reasoning": "specific new evidence", "confidence": "low|medium|high" }
+  ],
+
+  "next_steps": [
+    { "priority": "critical|high|medium", "action": "specific follow-up based on what this investigation revealed", "who": "law_enforcement|family|researcher" }
+  ],
+
+  "red_flags": [
+    { "flag": "concerning finding from this focused investigation", "severity": "high|medium" }
+  ],
+
+  "unanswered_questions": ["what we still don't know after this focused search"],
+
+  "web_findings": [
+    { "source": "ACTUAL URL", "finding": "specific fact found — VERIFY INDEPENDENTLY", "confidence": "low|medium|high" }
+  ],
+
+  "dig_deeper": [
+    { "title": "next investigation", "question": "follow-up question arising from THIS investigation's findings", "search_terms": "what to search" }
+  ]
+}
+
+CRITICAL RULES:
+- Do NOT repeat findings from a general case overview. This is a FOCUSED investigation.
+- The executive_summary must directly address the focus question: "${focusQuestion}"
+- Include actual URLs from web search results in web_findings.
+- dig_deeper must contain exactly 3 NEW follow-up questions that arise from THIS investigation (not generic).
+- NEVER claim a case is solved or remains are identified. Use "evidence suggests" language.
+- Flag any demographic mismatches (sex, age, race) as red flags.
+- Keep arrays to 3-5 items. 1-2 sentences each.
+- Return ONLY JSON, no markdown fences.`
 }
