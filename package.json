@@ -19,6 +19,7 @@
     "ai:associates": "npx tsx scripts/associate-cross-match.ts",
     "ai:temporal": "npx tsx scripts/temporal-cluster.ts",
     "ai:misclass": "npx tsx scripts/misclassification-flag.ts",
+    "ai:changes": "npx tsx scripts/classification-change-flag.ts",
     "pipeline:match": "npx tsx scripts/rule-based-match.ts",
     "pipeline:extract": "npx tsx scripts/ai-targeted-extract.ts",
     "pipeline:patterns": "npx tsx scripts/ai-pattern-analysis.ts",
