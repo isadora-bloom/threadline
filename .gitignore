@@ -38,3 +38,12 @@ next-env.d.ts
 
 # scraper output
 /scripts/data/
+
+# playwright smoke-test output (contains creds.json, screenshots, reports)
+/.pw-check/
+
+# supabase CLI cache
+/supabase/.temp/
+
+# transient debug artifacts
+/tattoo-temp.jpg
