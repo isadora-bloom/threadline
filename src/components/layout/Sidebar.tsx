@@ -109,12 +109,12 @@ export function Sidebar() {
     },
   })
 
-  const mainLinks = [
+  const mainLinks: Array<{ href: string; label: string; icon: typeof Fingerprint; badge?: number }> = [
     { href: '/lookup', label: 'Search', icon: Fingerprint },
     { href: '/registry', label: 'Browse All Cases', icon: Search },
     { href: '/needing-attention', label: 'Cases That Need You', icon: Flame },
     { href: '/my-watchlist', label: 'My Cases', icon: Star },
-    { href: '/intelligence', label: 'Analysis Engine', icon: Brain },
+    { href: '/intelligence', label: 'Analysis Engine', icon: Brain, badge: queueCount ?? 0 },
     { href: '/research', label: 'AI Research', icon: BookOpen },
     { href: '/profile', label: 'My Profile', icon: User },
     { href: '/guide', label: 'How It Works', icon: HelpCircle },

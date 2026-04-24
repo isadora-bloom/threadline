@@ -372,6 +372,10 @@ export function ResearchHistoryCard({ results, recordId }: { results: Array<Reco
           const date = new Date(run.created_at as string).toLocaleDateString()
           const model = run.model_used as string
 
+          const tokens = run.tokens_used as number | null
+          const promptHash = run.prompt_hash as string | null
+          const modelConfig = run.model_config as { max_tokens?: number } | null
+
           return (
             <div key={run.id as string ?? index} className="border border-slate-200 rounded-lg overflow-hidden">
               {/* Run header */}
@@ -401,6 +405,13 @@ export function ResearchHistoryCard({ results, recordId }: { results: Array<Reco
                     recordId={recordId}
                     onResearchComplete={handleResearchComplete}
                   />
+                  {(tokens || promptHash || modelConfig?.max_tokens) && (
+                    <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-3 text-[9px] text-slate-400 font-mono">
+                      {tokens != null && <span title="Output tokens used by this run">{tokens.toLocaleString()} tok</span>}
+                      {modelConfig?.max_tokens != null && <span title="Maximum output tokens configured">max {modelConfig.max_tokens}</span>}
+                      {promptHash && <span title="SHA-256 of the prompt sent to the model. Runs with the same hash used an identical prompt.">prompt {promptHash.slice(0, 8)}</span>}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

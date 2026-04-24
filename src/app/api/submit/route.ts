@@ -273,17 +273,6 @@ export async function POST(request: Request) {
               similarity: Math.round(maxSim * 100),
             })
           }
-
-          // Create similarity record
-          if (mostSimilarId) {
-            await supabase.from('submission_similarity').insert({
-              submission_a_id: submission.id,
-              submission_b_id: mostSimilarId,
-              similarity_score: maxSim,
-            }).then(({ error }) => {
-              if (error) console.error('Similarity insert error:', error)
-            })
-          }
         }
       }
     } catch (err) {

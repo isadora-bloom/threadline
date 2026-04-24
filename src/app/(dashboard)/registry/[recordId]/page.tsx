@@ -101,6 +101,74 @@ export default async function RegistryProfilePage({
     offenderOverlaps = (overlaps ?? []) as Array<Record<string, unknown>>
   }
 
+  // Shared entities — names / vehicles / possible duplicates that link this
+  // case to other cases. These rows are written by the doe-match entity
+  // extraction and were previously only counted as an intelligence stat.
+  type SharedEntity = {
+    id: string
+    entity_type: string
+    entity_value: string
+    raw_snippet: string | null
+    match_count: number
+    matched_submission_ids: string[] | null
+    matched_records: Array<{
+      id: string
+      person_name: string | null
+      record_type: string
+      state: string | null
+      external_id: string
+    }>
+  }
+  const sharedEntities: SharedEntity[] = []
+  if (submissionId) {
+    type MentionRow = { id: string; entity_type: string; entity_value: string; raw_snippet: string | null; match_count: number; matched_submission_ids: string[] | null }
+    type LinkedRecord = { id: string; submission_id: string | null; person_name: string | null; record_type: string; state: string | null; external_id: string }
+
+    const mentionsRes = await supabase
+      .from('doe_entity_mentions' as never)
+      .select('id, entity_type, entity_value, raw_snippet, match_count, matched_submission_ids')
+      .eq('submission_id', submissionId)
+      .gt('match_count', 0)
+      .order('match_count', { ascending: false })
+      .limit(25)
+    const mentions = (mentionsRes.data ?? []) as MentionRow[]
+
+    const linkedSubIds = new Set<string>()
+    for (const m of mentions) {
+      for (const sid of m.matched_submission_ids ?? []) linkedSubIds.add(sid)
+    }
+
+    let recordsBySubmission = new Map<string, LinkedRecord>()
+    if (linkedSubIds.size > 0) {
+      const linkedRes = await supabase
+        .from('import_records')
+        .select('id, submission_id, person_name, record_type, state, external_id')
+        .in('submission_id', Array.from(linkedSubIds))
+      const linkedRecords = (linkedRes.data ?? []) as LinkedRecord[]
+      recordsBySubmission = new Map(
+        linkedRecords
+          .filter(r => !!r.submission_id)
+          .map(r => [r.submission_id as string, r])
+      )
+    }
+
+    for (const m of mentions) {
+      const matched = (m.matched_submission_ids ?? [])
+        .map(sid => recordsBySubmission.get(sid))
+        .filter((r): r is LinkedRecord => !!r)
+      if (matched.length === 0) continue
+      sharedEntities.push({
+        id: m.id,
+        entity_type: m.entity_type,
+        entity_value: m.entity_value,
+        raw_snippet: m.raw_snippet,
+        match_count: m.match_count,
+        matched_submission_ids: m.matched_submission_ids,
+        matched_records: matched,
+      })
+    }
+  }
+
   // Fetch solvability
   const { data: solvabilityScore } = await supabase
     .from('solvability_scores')
@@ -411,6 +479,63 @@ export default async function RegistryProfilePage({
                       )}
                     </div>
                   ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Shared Entities — cross-case linkage */}
+          {sharedEntities.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Link2 className="h-4 w-4" />
+                  Shared Entities ({sharedEntities.length})
+                </CardTitle>
+                <p className="text-xs text-slate-500 mt-1">
+                  Names, vehicles, or near-duplicate identifiers that also appear in other cases.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {sharedEntities.map((entity) => {
+                    const typeStyle =
+                      entity.entity_type === 'possible_duplicate'
+                        ? 'bg-purple-100 text-purple-700 border-purple-200'
+                        : entity.entity_type === 'vehicle'
+                        ? 'bg-blue-100 text-blue-700 border-blue-200'
+                        : 'bg-slate-100 text-slate-700 border-slate-200'
+                    return (
+                      <div key={entity.id} className="p-2 bg-slate-50 rounded-md">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <Badge variant="outline" className={`text-xs ${typeStyle}`}>
+                            {entity.entity_type.replace(/_/g, ' ')}
+                          </Badge>
+                          <span className="text-sm font-medium text-slate-800">{entity.entity_value}</span>
+                          <span className="text-[10px] text-slate-400">
+                            matches {entity.matched_records.length} other case{entity.matched_records.length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        {entity.raw_snippet && (
+                          <p className="text-xs text-slate-500 italic mb-1">&ldquo;{entity.raw_snippet}&rdquo;</p>
+                        )}
+                        <div className="flex flex-wrap gap-1.5">
+                          {entity.matched_records.map((r) => (
+                            <Link
+                              key={r.id}
+                              href={`/registry/${r.id}`}
+                              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-200 transition-colors"
+                            >
+                              <span className="font-medium text-indigo-600">
+                                {r.person_name ?? r.external_id}
+                              </span>
+                              {r.state && <span className="text-slate-400">{r.state}</span>}
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </CardContent>
             </Card>

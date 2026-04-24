@@ -138,6 +138,33 @@ export default function IntelligencePage() {
     },
   })
 
+  // Lead-quality breakdown: outcome rates by queue_type. Admin-only because it
+  // exposes reviewer judgments and drives scoring-weight tuning, not day-to-day use.
+  const { data: leadQuality } = useQuery({
+    queryKey: ['lead-quality'],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('intelligence_queue')
+        .select('queue_type, outcome')
+        .not('outcome', 'is', null)
+      const rollup: Record<string, { total: number; led: number; dead: number; known: number; insufficient: number; duplicate: number }> = {}
+      for (const row of (data ?? []) as Array<{ queue_type: string; outcome: string }>) {
+        if (!rollup[row.queue_type]) rollup[row.queue_type] = { total: 0, led: 0, dead: 0, known: 0, insufficient: 0, duplicate: 0 }
+        const r = rollup[row.queue_type]
+        r.total++
+        if (row.outcome === 'led_somewhere') r.led++
+        else if (row.outcome === 'dead_end') r.dead++
+        else if (row.outcome === 'already_known') r.known++
+        else if (row.outcome === 'insufficient_evidence') r.insufficient++
+        else if (row.outcome === 'duplicate') r.duplicate++
+      }
+      return Object.entries(rollup)
+        .map(([queue_type, r]) => ({ queue_type, ...r, led_pct: r.total > 0 ? Math.round((r.led / r.total) * 100) : 0 }))
+        .sort((a, b) => b.total - a.total)
+    },
+  })
+
   async function handleRunAnalysis() {
     if (!caseId) return
     setIsRunningAnalysis(true)
@@ -292,6 +319,32 @@ export default function IntelligencePage() {
           or other forensic verification.
         </p>
       </div>
+
+      {/* Lead quality — admin-only feedback loop on which queue types produce real leads */}
+      {isAdmin && leadQuality && leadQuality.length > 0 && (
+        <div className="border border-slate-200 rounded-lg p-3 bg-white">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Lead quality by type</span>
+            <span className="text-[10px] text-slate-400">from reviewer outcomes — higher &ldquo;led&rdquo; % means the signal is pulling its weight</span>
+          </div>
+          <div className="space-y-1.5">
+            {leadQuality.map(q => (
+              <div key={q.queue_type} className="flex items-center gap-2 text-[11px]">
+                <span className="font-medium text-slate-700 min-w-[120px] truncate">{q.queue_type}</span>
+                <span className="text-slate-400 min-w-[36px] text-right">{q.total}</span>
+                <div className="flex-1 flex h-3 rounded overflow-hidden bg-slate-100">
+                  {q.led > 0 && <div title={`${q.led} led somewhere`} className="bg-emerald-500" style={{ flex: q.led }} />}
+                  {q.known > 0 && <div title={`${q.known} already known`} className="bg-sky-400" style={{ flex: q.known }} />}
+                  {q.insufficient > 0 && <div title={`${q.insufficient} insufficient evidence`} className="bg-amber-400" style={{ flex: q.insufficient }} />}
+                  {q.duplicate > 0 && <div title={`${q.duplicate} duplicates`} className="bg-purple-400" style={{ flex: q.duplicate }} />}
+                  {q.dead > 0 && <div title={`${q.dead} dead end`} className="bg-slate-400" style={{ flex: q.dead }} />}
+                </div>
+                <span className="text-emerald-700 font-medium min-w-[32px] text-right">{q.led_pct}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Help banner */}
       <div className="border border-slate-200 rounded-lg overflow-hidden">
