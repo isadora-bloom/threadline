@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,27 +13,41 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { MessageSquare, CheckCircle, Wrench, Heart } from 'lucide-react'
+import { MessageSquare, CheckCircle, Wrench, Heart, AlertCircle } from 'lucide-react'
+
+type FeedbackType = 'feedback' | 'bug' | 'idea' | 'match' | 'data'
 
 export default function FeedbackPage() {
-  const supabase = createClient()
-  const [type, setType] = useState('feedback')
+  const [type, setType] = useState<FeedbackType>('feedback')
   const [message, setMessage] = useState('')
   const [contact, setContact] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const submitMutation = useMutation({
     mutationFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      await supabase.from('community_notes').insert({
-        user_id: user?.id,
-        import_record_id: null,
-        note_type: type === 'bug' ? 'observation' : type === 'idea' ? 'lead' : 'observation',
-        content: `[${type.toUpperCase()}] ${message}${contact ? '\n\nContact: ' + contact : ''}`,
-        is_public: false,
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedback_type: type,
+          message,
+          contact: contact || undefined,
+          page_url: typeof window !== 'undefined' ? window.location.href : undefined,
+        }),
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Failed to submit feedback')
+      }
     },
-    onSuccess: () => setSubmitted(true),
+    onSuccess: () => {
+      setSubmitError(null)
+      setSubmitted(true)
+    },
+    onError: (err) => {
+      setSubmitError(err instanceof Error ? err.message : 'Submit failed')
+    },
   })
 
   if (submitted) {
@@ -119,7 +132,7 @@ export default function FeedbackPage() {
         <CardContent className="p-5 space-y-4">
           <h3 className="font-semibold text-slate-900 text-sm">Send feedback</h3>
 
-          <Select value={type} onValueChange={setType}>
+          <Select value={type} onValueChange={(v) => setType(v as FeedbackType)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -144,6 +157,13 @@ export default function FeedbackPage() {
             onChange={(e) => setContact(e.target.value)}
             placeholder="Your email (optional — only if you want a response)"
           />
+
+          {submitError && (
+            <div className="flex items-start gap-2 p-3 rounded-md bg-red-50 border border-red-100">
+              <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-700">{submitError}</p>
+            </div>
+          )}
 
           <Button
             onClick={() => submitMutation.mutate()}
