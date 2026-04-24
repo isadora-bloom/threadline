@@ -776,6 +776,11 @@ export default async function RegistryProfilePage({
                 <div className="space-y-3">
                   {communityNotes.map((note) => {
                     const noteUser = note.user as { full_name: string | null } | null
+                    const extraction = (note as unknown as { ai_extraction: Record<string, unknown> | null }).ai_extraction
+                    const entities = (extraction?.entities ?? []) as Array<Record<string, unknown>>
+                    const claims = (extraction?.claims ?? []) as Array<Record<string, unknown>>
+                    const urls = (extraction?.urls ?? []) as string[]
+                    const redFlags = (extraction?.red_flags ?? []) as string[]
                     return (
                       <div key={note.id} className="p-3 bg-slate-50 rounded-md">
                         <div className="flex items-center gap-2 mb-1">
@@ -783,8 +788,54 @@ export default async function RegistryProfilePage({
                           <span className="text-xs text-slate-500">
                             {noteUser?.full_name ?? 'Anonymous'} · {new Date(note.created_at).toLocaleDateString()}
                           </span>
+                          {extraction && (
+                            <Badge variant="outline" className="text-[10px] text-indigo-600 border-indigo-200 bg-indigo-50 ml-auto">
+                              AI parsed
+                            </Badge>
+                          )}
                         </div>
-                        <p className="text-sm text-slate-700">{note.content}</p>
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.content}</p>
+                        {extraction && (entities.length > 0 || claims.length > 0 || urls.length > 0 || redFlags.length > 0) && (
+                          <div className="mt-2 pt-2 border-t border-slate-200 space-y-1.5">
+                            {entities.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                                <span className="text-slate-400">Entities:</span>
+                                {entities.slice(0, 8).map((e, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
+                                    <span className="text-slate-400">{e.entity_type as string}</span>{' '}
+                                    <span className="font-medium">{e.raw_value as string}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {claims.length > 0 && (
+                              <div className="text-[11px] space-y-0.5">
+                                <span className="text-slate-400">Claims:</span>
+                                {claims.slice(0, 4).map((c, i) => (
+                                  <div key={i} className="pl-2 text-slate-700">
+                                    <span className="text-slate-400">[{c.type as string}]</span>{' '}
+                                    {c.text as string}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {urls.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                                <span className="text-slate-400">Links:</span>
+                                {urls.slice(0, 5).map((u, i) => (
+                                  <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline truncate max-w-[220px]">
+                                    {u}
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                            {redFlags.length > 0 && (
+                              <div className="text-[11px] text-amber-700">
+                                <span className="text-slate-400">Flags:</span> {redFlags.join(' · ')}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })}

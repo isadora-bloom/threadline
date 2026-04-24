@@ -135,16 +135,23 @@ export default function MyWatchlistPage() {
     },
   })
 
-  // Add community note
+  // Add community note — goes through the API so the content can be
+  // AI-parsed into structured entities/claims instead of sitting as inert text.
   const addNoteMutation = useMutation({
     mutationFn: async ({ recordId, content, type }: { recordId: string; content: string; type: string }) => {
-      await supabase.from('community_notes').insert({
-        user_id: user?.id,
-        import_record_id: recordId,
-        note_type: type,
-        content,
-        is_public: true,
+      const res = await fetch('/api/community-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          import_record_id: recordId,
+          content,
+          note_type: type,
+        }),
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Failed to post note')
+      }
     },
     onSuccess: () => {
       setNoteText('')
