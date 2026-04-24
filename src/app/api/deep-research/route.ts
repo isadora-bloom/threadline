@@ -47,6 +47,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to start research' }, { status: 500 })
   }
 
+  // Presence: log the research request against the record so watchers see it.
+  await supabase
+    .from('user_activity_log')
+    .insert({ user_id: user.id, activity_type: 'requested_research', ref_id: importRecordId } as never)
+    .then(({ error }: { error: { message: string } | null }) => { if (error) console.warn('activity log (research):', error.message) })
+
   try {
     // Gather context for AI
     const context = await gatherResearchContext(serviceClient, record, importRecordId)

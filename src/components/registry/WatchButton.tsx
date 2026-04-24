@@ -34,9 +34,17 @@ export function WatchButton({
         await supabase
           .from('user_watchlist')
           .insert({ user_id: userId, import_record_id: recordId })
+        // Record the action in user_activity_log so the registry profile can
+        // show this user as currently investigating the case. Non-fatal on
+        // failure — presence is a nice-to-have, not load-bearing.
+        await supabase
+          .from('user_activity_log')
+          .insert({ user_id: userId, activity_type: 'watched_case', ref_id: recordId } as never)
+          .then(({ error }) => { if (error) console.warn('activity log:', error.message) })
         setWatching(true)
       }
       queryClient.invalidateQueries({ queryKey: ['registry'] })
+      queryClient.invalidateQueries({ queryKey: ['presence', recordId] })
     } catch (err) {
       console.error('Watch toggle error:', err)
     } finally {

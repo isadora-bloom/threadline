@@ -207,6 +207,42 @@ export default async function RegistryProfilePage({
     .order('created_at', { ascending: false })
     .limit(5)
 
+  // Presence — who has taken action on this record in the last 72 hours.
+  // Ethical-engagement signal: watchers can see each other without explicit
+  // coordination. Dedup by user, show most recent activity type.
+  const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString()
+  type PresenceRow = { user_id: string; activity_type: string; created_at: string }
+  const { data: rawPresence } = await supabase
+    .from('user_activity_log')
+    .select('user_id, activity_type, created_at')
+    .eq('ref_id', recordId)
+    .gte('created_at', seventyTwoHoursAgo)
+    .order('created_at', { ascending: false })
+    .limit(50) as unknown as { data: PresenceRow[] | null }
+
+  const presenceByUser = new Map<string, PresenceRow>()
+  for (const row of rawPresence ?? []) {
+    if (!presenceByUser.has(row.user_id)) presenceByUser.set(row.user_id, row)
+  }
+  // Fetch display names in one shot.
+  const presenceUserIds = Array.from(presenceByUser.keys())
+  let presenceNames = new Map<string, string | null>()
+  if (presenceUserIds.length > 0) {
+    type ProfileRow = { id: string; full_name: string | null }
+    const { data: profiles } = await supabase
+      .from('user_profiles')
+      .select('id, full_name')
+      .in('id', presenceUserIds)
+    presenceNames = new Map(((profiles ?? []) as ProfileRow[]).map(p => [p.id, p.full_name]))
+  }
+  const presence = Array.from(presenceByUser.values()).map(row => ({
+    user_id: row.user_id,
+    activity_type: row.activity_type,
+    created_at: row.created_at,
+    name: presenceNames.get(row.user_id) ?? 'An investigator',
+    is_me: row.user_id === user.id,
+  }))
+
   const source = record.source as { display_name: string; slug: string; base_url: string } | null
 
   return (
@@ -312,6 +348,24 @@ export default async function RegistryProfilePage({
           <TagButton importRecordId={recordId} />
         </div>
       </div>
+
+      {/* Presence — who is currently investigating this case */}
+      {presence.length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-slate-600 bg-indigo-50/70 border border-indigo-100 rounded-lg px-3 py-2">
+          <Users className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />
+          <span className="text-indigo-900 font-medium">Currently investigating:</span>
+          <span className="flex-1 truncate">
+            {(() => {
+              const names = presence.map(p => (p.is_me ? 'You' : p.name))
+              const unique: string[] = []
+              for (const n of names) if (!unique.includes(n)) unique.push(n)
+              if (unique.length <= 3) return unique.join(', ')
+              return `${unique.slice(0, 3).join(', ')}, and ${unique.length - 3} other${unique.length - 3 === 1 ? '' : 's'}`
+            })()}
+          </span>
+          <span className="text-[10px] text-slate-400 flex-shrink-0">last 72h</span>
+        </div>
+      )}
 
       {/* The person — not the data */}
       {(() => {

@@ -64,6 +64,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: insertErr?.message ?? 'insert failed' }, { status: 500 })
   }
 
+  // Record the note as user activity so presence shows this user as
+  // investigating the case. Best-effort.
+  await supabase
+    .from('user_activity_log')
+    .insert({ user_id: user.id, activity_type: 'added_note', ref_id: import_record_id } as never)
+    .then(({ error }: { error: { message: string } | null }) => { if (error) console.warn('activity log (note):', error.message) })
+
   // Skip extraction for short notes — not worth the API call.
   if (content.trim().length < MIN_EXTRACT_LENGTH) {
     return NextResponse.json({ id: inserted.id, extracted: false })
