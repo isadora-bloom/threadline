@@ -12,6 +12,9 @@ import {
   Eye,
   Star,
   ArrowRight,
+  AlertTriangle,
+  Database,
+  RefreshCw,
 } from 'lucide-react'
 
 export default async function NeedingAttentionPage() {
@@ -101,6 +104,43 @@ export default async function NeedingAttentionPage() {
     .eq('user_id', user.id)
 
   const watchingSet = new Set(userWatchlist?.map(w => w.import_record_id) ?? [])
+
+  // Data quality: stale records
+  const { data: staleRecords } = await supabase
+    .from('import_records')
+    .select('id, person_name, record_type, state, external_id, source:import_sources(display_name)')
+    .eq('stale', true)
+    .limit(20)
+
+  // Data quality: potential cross-source duplicates
+  // Find person_name + sex + state combos that appear in multiple sources
+  const { data: dupeCheckRaw } = await supabase
+    .from('import_records')
+    .select('id, person_name, sex, state, record_type, external_id, source_id, source:import_sources(display_name, slug)')
+    .not('person_name', 'is', null)
+    .eq('record_type', 'missing_person')
+    .order('person_name')
+    .limit(2000)
+
+  // Group by normalized name+sex+state, flag combos with multiple source_ids
+  const dupeGroups: Array<{ key: string; records: typeof dupeCheckRaw }> = []
+  if (dupeCheckRaw?.length) {
+    const byKey: Record<string, typeof dupeCheckRaw> = {}
+    for (const r of dupeCheckRaw) {
+      if (!r.person_name || r.person_name === 'Unknown') continue
+      const key = `${(r.person_name as string).toLowerCase().trim()}|${(r.sex as string ?? '').toLowerCase()}|${(r.state as string ?? '').toLowerCase()}`
+      if (!byKey[key]) byKey[key] = []
+      byKey[key]!.push(r)
+    }
+    for (const [key, recs] of Object.entries(byKey)) {
+      const sourceIds = new Set(recs!.map(r => r.source_id))
+      if (sourceIds.size > 1) {
+        dupeGroups.push({ key, records: recs! })
+      }
+    }
+  }
+
+  const hasDataQuality = (staleRecords?.length ?? 0) > 0 || dupeGroups.length > 0
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -243,6 +283,112 @@ export default async function NeedingAttentionPage() {
               </Card>
             )
           })}
+        </div>
+      )}
+
+      {/* Data Quality / Entity Resolution */}
+      {hasDataQuality && (
+        <div className="space-y-4 pt-6 border-t border-slate-200">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Database className="h-5 w-5 text-amber-500" />
+              <h2 className="text-xl font-bold text-slate-900">Data Quality Review</h2>
+            </div>
+            <p className="text-sm text-slate-500">
+              Records that may have normalization errors, stale data, or potential duplicates across sources.
+            </p>
+          </div>
+
+          {/* Stale records */}
+          {staleRecords && staleRecords.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-1.5">
+                <RefreshCw className="h-4 w-4" />
+                Stale Records ({staleRecords.length})
+              </h3>
+              <p className="text-xs text-slate-500 mb-2">
+                Source data changed since last import. These records may have outdated information.
+              </p>
+              <div className="space-y-1.5">
+                {staleRecords.map(r => (
+                  <Link
+                    key={r.id}
+                    href={`/registry/${r.id}`}
+                    className="flex items-center justify-between p-2.5 rounded-md border border-amber-100 bg-amber-50 hover:bg-amber-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                      <span className="text-sm font-medium text-slate-900 truncate">
+                        {r.person_name ?? r.external_id}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        {r.record_type === 'missing_person' ? 'Missing' : 'Unidentified'}
+                      </span>
+                      {r.state && <span className="text-[10px] text-slate-400">{r.state}</span>}
+                      <span className="text-[10px] text-amber-600">
+                        {(r.source as { display_name: string } | null)?.display_name}
+                      </span>
+                    </div>
+                    <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Cross-source duplicates */}
+          {dupeGroups.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-purple-700 mb-2 flex items-center gap-1.5">
+                <AlertTriangle className="h-4 w-4" />
+                Potential Cross-Source Duplicates ({dupeGroups.length})
+              </h3>
+              <p className="text-xs text-slate-500 mb-2">
+                Same person name, sex, and state appearing in multiple databases. May be the same case tracked separately, or genuinely different people. Review to confirm.
+              </p>
+              <div className="space-y-2">
+                {dupeGroups.slice(0, 15).map(group => {
+                  const first = group.records![0]
+                  return (
+                    <Card key={group.key} className="border-purple-100">
+                      <CardContent className="p-3">
+                        <div className="flex items-start justify-between mb-1.5">
+                          <div>
+                            <span className="text-sm font-semibold text-slate-900">{first.person_name}</span>
+                            <span className="text-xs text-slate-500 ml-2">
+                              {first.sex}{first.state ? ` / ${first.state}` : ''}
+                            </span>
+                          </div>
+                          <Badge className="text-[10px] bg-purple-100 text-purple-700 border-purple-200">
+                            {group.records!.length} records
+                          </Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {group.records!.map(r => (
+                            <Link
+                              key={r.id}
+                              href={`/registry/${r.id}`}
+                              className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-slate-50 border border-slate-200 hover:bg-indigo-50 hover:border-indigo-200 transition-colors"
+                            >
+                              <span className="font-medium text-indigo-600">{r.external_id}</span>
+                              <span className="text-slate-400">
+                                {(r.source as { display_name: string } | null)?.display_name}
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+                {dupeGroups.length > 15 && (
+                  <p className="text-xs text-slate-400 text-center">
+                    {dupeGroups.length - 15} more potential duplicates not shown
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -73,15 +73,17 @@ export default function RegistryPage() {
   const { data: stats } = useQuery({
     queryKey: ['registry-stats'],
     queryFn: async () => {
-      const [missing, unidentified, processed] = await Promise.all([
+      const [missing, unidentified, processed, sources] = await Promise.all([
         supabase.from('import_records').select('id', { count: 'exact', head: true }).eq('record_type', 'missing_person'),
         supabase.from('import_records').select('id', { count: 'exact', head: true }).eq('record_type', 'unidentified_remains'),
         supabase.from('import_records').select('id', { count: 'exact', head: true }).eq('ai_processed', true),
+        supabase.from('import_sources').select('display_name, last_import_at, total_records').eq('is_active', true).order('display_name'),
       ])
       return {
         missing: missing.count ?? 0,
         unidentified: unidentified.count ?? 0,
         processed: processed.count ?? 0,
+        sources: (sources.data ?? []) as Array<{ display_name: string; last_import_at: string | null; total_records: number }>,
       }
     },
   })
@@ -160,6 +162,27 @@ export default function RegistryPage() {
             </>
           ) : 'Loading...'}
         </p>
+        {stats?.sources && stats.sources.length > 0 && (
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+            {stats.sources.map(s => {
+              const age = s.last_import_at ? Math.floor((Date.now() - new Date(s.last_import_at).getTime()) / 86400000) : null
+              const fresh = age !== null && age <= 30
+              return (
+                <span key={s.display_name} className="text-[11px] text-slate-400">
+                  {s.display_name}:{' '}
+                  {age !== null ? (
+                    <span className={fresh ? 'text-emerald-600' : 'text-amber-600'}>
+                      {age === 0 ? 'today' : `${age}d ago`}
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">never</span>
+                  )}
+                  {s.total_records > 0 && <span className="text-slate-300"> ({s.total_records.toLocaleString()})</span>}
+                </span>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Filters */}
