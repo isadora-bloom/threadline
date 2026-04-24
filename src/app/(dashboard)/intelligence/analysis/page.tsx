@@ -108,7 +108,7 @@ export default function IntelligencePage() {
         supabase.from('import_records').select('id', { count: 'exact', head: true }),
         supabase.from('doe_victimology_clusters').select('id', { count: 'exact', head: true }),
         supabase.from('doe_entity_mentions').select('id', { count: 'exact', head: true }),
-        caseId ? supabase.from('case_pattern_settings').select('updated_at').eq('case_id', caseId).single() : Promise.resolve({ data: null }),
+        caseId ? supabase.from('case_pattern_settings').select('updated_at').eq('case_id', caseId).maybeSingle() : Promise.resolve({ data: null }),
       ])
       return {
         doe_total: doeVeryStrong.count ?? 0,
@@ -403,15 +403,30 @@ export default function IntelligencePage() {
 
 // ── Threads Tab — shows investigative leads from deep research, grouped by case ──
 
+const LEAD_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  research_connection: { label: 'Connection', color: 'bg-blue-100 text-blue-700' },
+  research_action: { label: 'Next Step', color: 'bg-green-100 text-green-700' },
+  research_red_flag: { label: 'Red Flag', color: 'bg-red-100 text-red-700' },
+  research_question: { label: 'Question', color: 'bg-amber-100 text-amber-700' },
+}
+
+const OUTCOME_OPTIONS = [
+  { value: 'led_somewhere', label: 'Led somewhere', color: 'bg-emerald-100 text-emerald-800' },
+  { value: 'dead_end', label: 'Dead end', color: 'bg-slate-200 text-slate-700' },
+  { value: 'already_known', label: 'Already known', color: 'bg-sky-100 text-sky-700' },
+  { value: 'insufficient_evidence', label: 'Insufficient', color: 'bg-amber-100 text-amber-700' },
+  { value: 'duplicate', label: 'Duplicate', color: 'bg-purple-100 text-purple-700' },
+]
+
 function ThreadsTab() {
   const supabase = createClient()
   const queryClient = useQueryClient()
-  const [expandedCases, setExpandedCases] = useState<Record<string, boolean>>({})
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [editingNote, setEditingNote] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
   const [savingNote, setSavingNote] = useState(false)
+  const [showOutcomes, setShowOutcomes] = useState(false)
 
-  // Fetch leads AND the import records they're linked to
   const { data: leadsWithRecords, isLoading } = useQuery({
     queryKey: ['research-leads-grouped'],
     queryFn: async () => {
@@ -421,18 +436,16 @@ function ThreadsTab() {
         .eq('queue_type', 'new_lead')
         .neq('status', 'dismissed')
         .order('priority_score', { ascending: false })
-        .limit(100)
+        .limit(200)
 
       if (!leads?.length) return { leads: [], records: {} }
 
-      // Collect all unique import record IDs from leads
       const importIds = new Set<string>()
       for (const lead of leads) {
         const ids = lead.related_import_ids as string[] | null
         if (ids) ids.forEach(id => importIds.add(id))
       }
 
-      // Fetch the person info for those records
       const records: Record<string, { id: string; person_name: string | null; record_type: string; state: string | null; external_id: string }> = {}
       if (importIds.size > 0) {
         const { data: importRecords } = await supabase
@@ -457,6 +470,16 @@ function ThreadsTab() {
     queryClient.invalidateQueries({ queryKey: ['research-leads-grouped'] })
   }
 
+  const setOutcome = async (id: string, outcome: string) => {
+    await supabase.from('intelligence_queue').update({
+      outcome,
+      outcome_at: new Date().toISOString(),
+      status: 'actioned',
+      reviewed_at: new Date().toISOString(),
+    }).eq('id', id)
+    queryClient.invalidateQueries({ queryKey: ['research-leads-grouped'] })
+  }
+
   const saveNote = async (leadId: string) => {
     setSavingNote(true)
     await supabase.from('intelligence_queue').update({ reviewer_note: noteText || null }).eq('id', leadId)
@@ -464,6 +487,8 @@ function ThreadsTab() {
     setEditingNote(null)
     setSavingNote(false)
   }
+
+  const toggle = (key: string) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }))
 
   if (isLoading) return <div className="py-8 text-center"><Loader2 className="h-5 w-5 animate-spin text-slate-400 mx-auto" /></div>
 
@@ -474,204 +499,211 @@ function ThreadsTab() {
       <p className="text-sm text-slate-500 max-w-md mx-auto">
         Run &quot;Threadline AI&quot; on a watched case to generate leads. Each finding becomes a trackable thread here.
       </p>
-      <Link href="/my-watchlist" className="text-sm text-indigo-600 font-medium hover:underline inline-block pt-2">Go to My Cases →</Link>
+      <Link href="/my-watchlist" className="text-sm text-indigo-600 font-medium hover:underline inline-block pt-2">Go to My Cases &rarr;</Link>
     </div>
   )
 
-  // Group leads by their first related import record
-  const grouped: Record<string, typeof leads> = {}
+  // Two-level grouping: record_type > person
+  const byType: Record<string, Record<string, typeof leads>> = { missing_person: {}, unidentified_remains: {}, _other: {} }
   for (const lead of leads) {
     const ids = lead.related_import_ids as string[] | null
-    const key = ids?.[0] ?? '_ungrouped'
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push(lead)
+    const recordId = ids?.[0] ?? '_ungrouped'
+    const rec = records[recordId]
+    const typeKey = rec?.record_type === 'missing_person' ? 'missing_person'
+      : rec?.record_type === 'unidentified_remains' ? 'unidentified_remains'
+      : '_other'
+    if (!byType[typeKey][recordId]) byType[typeKey][recordId] = []
+    byType[typeKey][recordId].push(lead)
   }
 
-  // Sort groups by highest priority lead in each group
-  const sortedGroups = Object.entries(grouped).sort(([, a], [, b]) => {
-    const maxA = Math.max(...a.map(l => l.priority_score ?? 0))
-    const maxB = Math.max(...b.map(l => l.priority_score ?? 0))
-    return maxB - maxA
-  })
+  const TYPE_SECTIONS = [
+    { key: 'missing_person', label: 'Missing Persons', icon: '?', bgColor: 'bg-indigo-50 border-indigo-200', textColor: 'text-indigo-800' },
+    { key: 'unidentified_remains', label: 'Unidentified Remains', icon: '?', bgColor: 'bg-rose-50 border-rose-200', textColor: 'text-rose-800' },
+    { key: '_other', label: 'Other', icon: '?', bgColor: 'bg-slate-50 border-slate-200', textColor: 'text-slate-700' },
+  ]
 
-  const TYPE_LABELS: Record<string, { label: string; color: string }> = {
-    research_connection: { label: 'Connection', color: 'bg-blue-100 text-blue-700' },
-    research_action: { label: 'Next Step', color: 'bg-green-100 text-green-700' },
-    research_red_flag: { label: 'Red Flag', color: 'bg-red-100 text-red-700' },
-    research_question: { label: 'Question', color: 'bg-amber-100 text-amber-700' },
-  }
-
-  const toggleCase = (key: string) => {
-    setExpandedCases(prev => ({ ...prev, [key]: !prev[key] }))
+  // Outcome stats
+  const outcomeStats = {
+    led_somewhere: leads.filter(l => (l as Record<string, unknown>).outcome === 'led_somewhere').length,
+    dead_end: leads.filter(l => (l as Record<string, unknown>).outcome === 'dead_end').length,
+    already_known: leads.filter(l => (l as Record<string, unknown>).outcome === 'already_known').length,
+    no_outcome: leads.filter(l => !(l as Record<string, unknown>).outcome).length,
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-slate-500 mb-3">
-        Leads generated by Threadline AI deep research, grouped by case. {sortedGroups.length} case{sortedGroups.length !== 1 ? 's' : ''} with {leads.length} total leads.
-      </p>
-      {sortedGroups.map(([recordId, groupLeads]) => {
-        const record = records[recordId]
-        const isExpanded = expandedCases[recordId] !== false // default open
-        const activeCount = groupLeads.filter(l => l.status === 'new' || l.status === 'reviewing').length
-        const maxPriority = Math.max(...groupLeads.map(l => l.priority_score ?? 0))
+    <div className="space-y-4">
+      {/* Summary bar */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-slate-500">
+          {leads.length} leads across {Object.values(byType).reduce((n, g) => n + Object.keys(g).length, 0)} cases
+        </p>
+        <button
+          onClick={() => setShowOutcomes(v => !v)}
+          className="text-[10px] text-indigo-600 hover:underline font-medium"
+        >
+          {showOutcomes ? 'Hide outcomes' : 'Show outcomes'}
+        </button>
+      </div>
+
+      {/* Outcome stats */}
+      {showOutcomes && (
+        <div className="flex gap-3 text-[11px]">
+          <span className="text-emerald-700 font-medium">{outcomeStats.led_somewhere} led somewhere</span>
+          <span className="text-slate-500">{outcomeStats.dead_end} dead ends</span>
+          <span className="text-sky-600">{outcomeStats.already_known} already known</span>
+          <span className="text-slate-400">{outcomeStats.no_outcome} unresolved</span>
+        </div>
+      )}
+
+      {/* Type sections */}
+      {TYPE_SECTIONS.map(section => {
+        const people = byType[section.key]
+        const personEntries = Object.entries(people)
+        if (!personEntries.length) return null
+
+        // Sort by max priority
+        personEntries.sort(([, a], [, b]) => {
+          const maxA = Math.max(...a.map(l => l.priority_score ?? 0))
+          const maxB = Math.max(...b.map(l => l.priority_score ?? 0))
+          return maxB - maxA
+        })
+
+        const sectionTotal = personEntries.reduce((n, [, ls]) => n + ls.length, 0)
+        const sectionActive = personEntries.reduce((n, [, ls]) => n + ls.filter(l => l.status === 'new' || l.status === 'reviewing').length, 0)
+        const sectionExpanded = expandedSections[section.key] !== false
 
         return (
-          <div key={recordId} className="border border-slate-200 rounded-lg overflow-hidden">
-            {/* Case header — collapsible */}
+          <div key={section.key} className={`border rounded-lg overflow-hidden ${section.bgColor}`}>
+            {/* Section header */}
             <button
-              onClick={() => toggleCase(recordId)}
-              className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+              onClick={() => toggle(section.key)}
+              className="w-full flex items-center justify-between px-4 py-2.5 hover:brightness-95 transition text-left"
             >
-              <div className="flex items-center gap-2 min-w-0">
-                {isExpanded ? <ChevronUp className="h-4 w-4 text-slate-400 flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-slate-400 flex-shrink-0" />}
-                <div className="min-w-0">
-                  {record ? (
-                    <span className="text-sm font-semibold text-slate-900 truncate block">
-                      {record.person_name ?? record.external_id}
-                    </span>
-                  ) : (
-                    <span className="text-sm font-semibold text-slate-500">Ungrouped leads</span>
-                  )}
-                  {record && (
-                    <span className="text-[10px] text-slate-500">
-                      {record.record_type === 'missing_person' ? 'Missing' : 'Unidentified'}{record.state ? ` · ${record.state}` : ''}
-                    </span>
-                  )}
-                </div>
+              <div className="flex items-center gap-2">
+                {sectionExpanded ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                <span className={`text-sm font-bold ${section.textColor}`}>{section.label}</span>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {maxPriority >= 75 && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800">
-                    P{maxPriority}
-                  </span>
-                )}
-                <span className="text-[10px] text-slate-500">
-                  {activeCount} active · {groupLeads.length} total
-                </span>
-              </div>
+              <span className="text-[10px] text-slate-500">{sectionActive} active / {sectionTotal} leads / {personEntries.length} cases</span>
             </button>
 
-            {/* Leads in this group */}
-            {isExpanded && (
-              <div className="p-2 space-y-2">
-                {record && (
-                  <Link href={`/registry/${record.id}`} className="text-[10px] text-indigo-600 hover:underline font-medium px-2">
-                    Open profile →
-                  </Link>
-                )}
-                {groupLeads.map((lead) => {
-                  const details = lead.details as Record<string, unknown> | null
-                  const typeConfig = TYPE_LABELS[(details?.type as string) ?? ''] ?? { label: 'Lead', color: 'bg-slate-100 text-slate-600' }
-                  const existingNote = lead.reviewer_note as string | null
+            {/* Person groups inside section */}
+            {sectionExpanded && (
+              <div className="px-2 pb-2 space-y-2">
+                {personEntries.map(([recordId, groupLeads]) => {
+                  const record = records[recordId]
+                  const personKey = `${section.key}_${recordId}`
+                  const isExpanded = expandedSections[personKey] !== false
+                  const activeCount = groupLeads.filter(l => l.status === 'new' || l.status === 'reviewing').length
+                  const maxPriority = Math.max(...groupLeads.map(l => l.priority_score ?? 0))
 
                   return (
-                    <div key={lead.id} className={`p-3 rounded-lg border ${
-                      lead.status === 'actioned' ? 'border-green-200 bg-green-50/50' :
-                      lead.status === 'reviewing' ? 'border-blue-200 bg-blue-50/50' :
-                      'border-slate-200 bg-white'
-                    }`}>
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${typeConfig.color}`}>
-                            {typeConfig.label}
-                          </span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            lead.priority_score >= 75 ? 'bg-red-100 text-red-800' :
-                            lead.priority_score >= 50 ? 'bg-amber-100 text-amber-800' :
-                            'bg-slate-100 text-slate-600'
-                          }`}>
-                            {lead.priority_score}
-                          </span>
-                          {lead.status !== 'new' && (
-                            <span className={`text-[10px] ${
-                              lead.status === 'actioned' ? 'text-green-600' :
-                              lead.status === 'reviewing' ? 'text-blue-600' :
-                              'text-slate-400'
-                            }`}>
-                              {lead.status}
+                    <div key={recordId} className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                      <button
+                        onClick={() => toggle(personKey)}
+                        className="w-full flex items-center justify-between px-3 py-2 bg-white hover:bg-slate-50 transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
+                          <div className="min-w-0">
+                            <span className="text-sm font-semibold text-slate-900 truncate block">
+                              {record ? (record.person_name ?? record.external_id) : 'Ungrouped'}
                             </span>
-                          )}
-                        </div>
-                      </div>
-                      <h4 className="text-sm font-semibold text-slate-900 mb-1">{lead.title}</h4>
-                      <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">{lead.summary}</p>
-
-                      {/* Note display / edit */}
-                      {editingNote === lead.id ? (
-                        <div className="mt-2 space-y-1">
-                          <textarea
-                            value={noteText}
-                            onChange={(e) => setNoteText(e.target.value)}
-                            placeholder="Add your thoughts on this lead..."
-                            className="w-full text-xs p-2 border border-slate-300 rounded resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                            rows={2}
-                            autoFocus
-                          />
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => saveNote(lead.id)}
-                              disabled={savingNote}
-                              className="text-[10px] px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium"
-                            >
-                              {savingNote ? 'Saving...' : 'Save note'}
-                            </button>
-                            <button
-                              onClick={() => setEditingNote(null)}
-                              className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 font-medium"
-                            >
-                              Cancel
-                            </button>
+                            {record?.state && <span className="text-[10px] text-slate-500">{record.state}</span>}
                           </div>
                         </div>
-                      ) : existingNote ? (
-                        <div
-                          className="mt-2 p-2 bg-amber-50 border border-amber-100 rounded text-xs text-amber-800 cursor-pointer hover:bg-amber-100"
-                          onClick={() => { setEditingNote(lead.id); setNoteText(existingNote) }}
-                          title="Click to edit note"
-                        >
-                          <span className="font-medium text-amber-600">Note:</span> {existingNote}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {maxPriority >= 75 && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800">P{maxPriority}</span>}
+                          <span className="text-[10px] text-slate-500">{activeCount}/{groupLeads.length}</span>
                         </div>
-                      ) : null}
+                      </button>
 
-                      <div className="flex items-center gap-2 mt-2">
-                        {lead.status === 'new' && (
-                          <>
-                            <button onClick={() => updateStatus(lead.id, 'reviewing')}
-                              className="text-[10px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium">
-                              Investigating
-                            </button>
-                            <button onClick={() => updateStatus(lead.id, 'actioned')}
-                              className="text-[10px] px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 font-medium">
-                              Done
-                            </button>
-                            <button onClick={() => updateStatus(lead.id, 'dismissed')}
-                              className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 font-medium">
-                              Dismiss
-                            </button>
-                          </>
-                        )}
-                        {lead.status === 'reviewing' && (
-                          <>
-                            <button onClick={() => updateStatus(lead.id, 'actioned')}
-                              className="text-[10px] px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 font-medium">
-                              Mark done
-                            </button>
-                            <button onClick={() => updateStatus(lead.id, 'dismissed')}
-                              className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 font-medium">
-                              Dead end
-                            </button>
-                          </>
-                        )}
-                        {!editingNote && editingNote !== lead.id && (
-                          <button
-                            onClick={() => { setEditingNote(lead.id); setNoteText(existingNote ?? '') }}
-                            className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 font-medium ml-auto"
-                          >
-                            {existingNote ? 'Edit note' : '+ Note'}
-                          </button>
-                        )}
-                      </div>
+                      {isExpanded && (
+                        <div className="p-2 space-y-2 border-t border-slate-100">
+                          {record && (
+                            <Link href={`/registry/${record.id}`} className="text-[10px] text-indigo-600 hover:underline font-medium px-1">
+                              Open profile &rarr;
+                            </Link>
+                          )}
+                          {groupLeads.map((lead) => {
+                            const details = lead.details as Record<string, unknown> | null
+                            const typeConfig = LEAD_TYPE_LABELS[(details?.type as string) ?? ''] ?? { label: 'Lead', color: 'bg-slate-100 text-slate-600' }
+                            const existingNote = lead.reviewer_note as string | null
+                            const outcome = (lead as Record<string, unknown>).outcome as string | null
+                            const outcomeConfig = outcome ? OUTCOME_OPTIONS.find(o => o.value === outcome) : null
+
+                            return (
+                              <div key={lead.id} className={`p-3 rounded-lg border ${
+                                outcome === 'led_somewhere' ? 'border-emerald-200 bg-emerald-50/50' :
+                                lead.status === 'actioned' ? 'border-green-200 bg-green-50/50' :
+                                lead.status === 'reviewing' ? 'border-blue-200 bg-blue-50/50' :
+                                'border-slate-200 bg-white'
+                              }`}>
+                                <div className="flex items-start justify-between gap-2 mb-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${typeConfig.color}`}>{typeConfig.label}</span>
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      lead.priority_score >= 75 ? 'bg-red-100 text-red-800' :
+                                      lead.priority_score >= 50 ? 'bg-amber-100 text-amber-800' :
+                                      'bg-slate-100 text-slate-600'
+                                    }`}>{lead.priority_score}</span>
+                                    {lead.status !== 'new' && !outcomeConfig && (
+                                      <span className={`text-[10px] ${lead.status === 'actioned' ? 'text-green-600' : lead.status === 'reviewing' ? 'text-blue-600' : 'text-slate-400'}`}>{lead.status}</span>
+                                    )}
+                                    {outcomeConfig && (
+                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${outcomeConfig.color}`}>{outcomeConfig.label}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <h4 className="text-sm font-semibold text-slate-900 mb-1">{lead.title}</h4>
+                                <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">{lead.summary}</p>
+
+                                {/* Note */}
+                                {editingNote === lead.id ? (
+                                  <div className="mt-2 space-y-1">
+                                    <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Add your thoughts..." className="w-full text-xs p-2 border border-slate-300 rounded resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400" rows={2} autoFocus />
+                                    <div className="flex gap-1">
+                                      <button onClick={() => saveNote(lead.id)} disabled={savingNote} className="text-[10px] px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium">{savingNote ? 'Saving...' : 'Save'}</button>
+                                      <button onClick={() => setEditingNote(null)} className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 font-medium">Cancel</button>
+                                    </div>
+                                  </div>
+                                ) : existingNote ? (
+                                  <div className="mt-2 p-2 bg-amber-50 border border-amber-100 rounded text-xs text-amber-800 cursor-pointer hover:bg-amber-100" onClick={() => { setEditingNote(lead.id); setNoteText(existingNote) }}>
+                                    <span className="font-medium text-amber-600">Note:</span> {existingNote}
+                                  </div>
+                                ) : null}
+
+                                {/* Actions + Outcome */}
+                                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                                  {lead.status === 'new' && (
+                                    <>
+                                      <button onClick={() => updateStatus(lead.id, 'reviewing')} className="text-[10px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium">Investigating</button>
+                                      <button onClick={() => updateStatus(lead.id, 'dismissed')} className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 font-medium">Dismiss</button>
+                                    </>
+                                  )}
+                                  {(lead.status === 'reviewing' || lead.status === 'actioned') && !outcome && (
+                                    <>
+                                      {OUTCOME_OPTIONS.map(opt => (
+                                        <button key={opt.value} onClick={() => setOutcome(lead.id, opt.value)} className={`text-[10px] px-2 py-1 rounded font-medium hover:brightness-90 ${opt.color}`}>{opt.label}</button>
+                                      ))}
+                                    </>
+                                  )}
+                                  {lead.status === 'new' && (
+                                    <span className="text-[9px] text-slate-300 mx-1">|</span>
+                                  )}
+                                  {OUTCOME_OPTIONS.slice(0, 2).map(opt => lead.status === 'new' ? (
+                                    <button key={opt.value} onClick={() => setOutcome(lead.id, opt.value)} className={`text-[10px] px-2 py-1 rounded font-medium hover:brightness-90 ${opt.color}`}>{opt.label}</button>
+                                  ) : null)}
+                                  {!editingNote && editingNote !== lead.id && (
+                                    <button onClick={() => { setEditingNote(lead.id); setNoteText(existingNote ?? '') }} className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 font-medium ml-auto">
+                                      {existingNote ? 'Edit note' : '+ Note'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
