@@ -282,8 +282,10 @@ async function main() {
       if (score < 21) continue
 
       const grade = gradeScore(score)
+      const aiSummary = buildSummary(missing, remains, signals)
 
-      // Upsert connection
+      // Upsert connection with the human-readable reasoning baked in so the UI
+      // can render a sentence without regenerating it every page load.
       const { error: connErr } = await supabase
         .from('global_connections')
         .upsert({
@@ -295,6 +297,8 @@ async function main() {
           signals,
           distance_miles,
           days_apart,
+          ai_summary: aiSummary,
+          ai_confidence: score / 100,
           generated_at: new Date().toISOString(),
         }, { onConflict: 'record_a_id,record_b_id' })
 
@@ -306,7 +310,9 @@ async function main() {
 
       connectionsCreated++
 
-      // Add notable+ connections to intelligence queue
+      // Add notable+ connections to intelligence queue. Reuses the same
+      // aiSummary computed above so the connection row and the queue row
+      // tell a consistent story.
       if (score >= 41) {
         const missingName = missing.person_name ?? `NamUs ${missing.external_id}`
         const remainsName = `Unidentified (${remains.state ?? '??'}, ${remains.date_found ?? '??'})`
@@ -318,7 +324,7 @@ async function main() {
             priority_score: score,
             priority_grade: score >= 70 ? 'high' : score >= 50 ? 'medium' : 'low',
             title: `Possible match: ${missingName} ↔ ${remainsName}`,
-            summary: buildSummary(missing, remains, signals),
+            summary: aiSummary,
             details: { missing_id: missing.id, remains_id: remains.id, signals },
             related_import_ids: [missing.id, remains.id],
             signal_count: Object.keys(signals).filter(k => !k.includes('mismatch') && !k.includes('impossible')).length,
@@ -346,17 +352,36 @@ function buildSummary(missing: ImportRecord, remains: ImportRecord, signals: Rec
   parts.push(`may match unidentified remains found in ${remains.state ?? '?'}`)
   parts.push(`on ${remains.date_found ?? '(date unknown)'}.`)
 
-  const matchSignals: string[] = []
-  if (signals.sex_match) matchSignals.push('sex matches')
-  if (signals.age_overlap) matchSignals.push('age overlaps')
-  if (signals.race_match) matchSignals.push('race matches')
-  if (signals.same_state) matchSignals.push('same state')
-  if (signals.corridor_match) matchSignals.push('same highway corridor')
-  if (signals.mark_overlap) matchSignals.push('distinguishing marks overlap')
-  if (signals.hair_match) matchSignals.push('hair color matches')
+  // Positive signals — things that support the match.
+  const supports: string[] = []
+  if (signals.sex_match) supports.push('sex matches')
+  if (signals.age_overlap) supports.push('age overlaps')
+  if (signals.age_close) supports.push('age within 5 years')
+  if (signals.race_match) supports.push('race matches')
+  if (signals.same_state) supports.push('same state')
+  if (signals.temporal_very_close) supports.push('dates within 30 days')
+  else if (signals.temporal_close) supports.push('dates within 6 months')
+  else if (signals.temporal_moderate) supports.push('dates within a year')
+  else if (signals.temporal_wide) supports.push('dates within 3 years')
+  if (signals.corridor_match) supports.push('same highway corridor')
+  if (signals.mark_overlap) supports.push('distinguishing marks overlap')
+  if (signals.hair_match) supports.push('hair color matches')
+  if (signals.eye_match) supports.push('eye color matches')
 
-  if (matchSignals.length > 0) {
-    parts.push(`Signals: ${matchSignals.join(', ')}.`)
+  if (supports.length > 0) {
+    parts.push(`Supports: ${supports.join(', ')}.`)
+  }
+
+  // Contradictions — penalties that keep a reader honest about why the
+  // overall score might still be lower than the supports suggest.
+  const contradicts: string[] = []
+  if (signals.sex_mismatch) contradicts.push('sex differs')
+  if (signals.age_mismatch) contradicts.push('age incompatible')
+  if (signals.race_mismatch) contradicts.push('race differs')
+  if (signals.temporal_impossible) contradicts.push('remains found BEFORE person went missing — likely not the same person')
+
+  if (contradicts.length > 0) {
+    parts.push(`Against: ${contradicts.join(', ')}.`)
   }
 
   return parts.join(' ')
