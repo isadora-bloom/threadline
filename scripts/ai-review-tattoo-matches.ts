@@ -10,6 +10,7 @@
 
 import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
+import { REVIEW_MODEL } from '../src/lib/ai-models'
 
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
@@ -108,7 +109,7 @@ async function main() {
 
     try {
       const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: REVIEW_MODEL,
         max_tokens: 600,
         system: SYSTEM_PROMPT,
         messages: [{

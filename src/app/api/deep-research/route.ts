@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { createHash } from 'crypto'
 import Anthropic from '@anthropic-ai/sdk'
+import { RESEARCH_MODEL } from '@/lib/ai-models'
 
 export const maxDuration = 60
 
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
       prompt = buildResearchPrompt(record, context, webResults)
     }
 
-    const modelId = 'claude-haiku-4-5-20251001'
+    const modelId = RESEARCH_MODEL
     const maxTokens = 4096
     const promptHash = createHash('sha256').update(prompt).digest('hex')
 

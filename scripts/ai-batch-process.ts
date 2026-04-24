@@ -16,6 +16,7 @@ import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
+import { SCORING_MODEL } from '../src/lib/ai-models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -165,7 +166,7 @@ ${caseText}`
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6-20250514',
+      model: SCORING_MODEL,
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -288,7 +289,7 @@ async function processBatch(records: Array<{
               signals: extraction.solvability_signals as Record<string, unknown>,
               ai_summary: solvability.solvability_reasoning ?? '',
               ai_next_steps: (nextSteps?.investigative_gaps ?? []) as string[],
-              model_used: 'claude-sonnet-4-6-20250514',
+              model_used: SCORING_MODEL,
               computed_at: new Date().toISOString(),
             }, { onConflict: 'import_record_id' })
         }

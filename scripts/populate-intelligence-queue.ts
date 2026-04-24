@@ -217,13 +217,19 @@ async function flagOffenderOverlaps() {
         matchedSignals.push(`disposal_overlap:${disposalOverlap.join(',')}`)
       }
 
-      // Temporal check — hard eliminate if record is after offender incarceration
-      if (offender.incarcerated_from && record.date_missing) {
-        const incarYear = offender.incarcerated_from as number
-        const missYear = new Date(record.date_missing as string).getFullYear()
-        if (missYear > incarYear) {
-          continue // skip, offender was incarcerated
-        }
+      // Temporal gates — hard eliminate when the event window and the
+      // offender's active/incarceration window cannot overlap. Missing persons
+      // anchor on date_missing; unidentified remains anchor on date_found.
+      const anchorDate = (record.date_missing ?? record.date_found) as string | null
+      const recordYear = anchorDate ? new Date(anchorDate).getFullYear() : null
+      if (recordYear && !Number.isNaN(recordYear)) {
+        const incarFrom = offender.incarcerated_from as number | null
+        if (incarFrom && recordYear > incarFrom) continue // locked up by this year
+        const activeFrom = offender.active_from as number | null
+        if (activeFrom && recordYear < activeFrom) continue // too early
+        const activeTo = offender.active_to as number | null
+        // active_to null means "still active or unknown end" — don't eliminate on that.
+        if (activeTo && recordYear > activeTo) continue // offender stopped
       }
 
       // Only flag strong overlaps

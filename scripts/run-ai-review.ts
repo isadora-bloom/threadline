@@ -8,6 +8,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { REVIEW_MODEL } from '../src/lib/ai-models'
 import Anthropic from '@anthropic-ai/sdk'
 import * as dotenv from 'dotenv'
 import { resolve } from 'path'
@@ -52,7 +53,7 @@ const BATCH = 20
 
 async function reviewOne(matchId: string, missingText: string, unidentifiedText: string) {
   const msg = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: REVIEW_MODEL,
     max_tokens: 512,
     system: SYSTEM_PROMPT,
     messages: [{
@@ -73,7 +74,7 @@ async function reviewOne(matchId: string, missingText: string, unidentifiedText:
     if (m) assessment = JSON.parse(m[0])
   } catch { /* keep default */ }
 
-  const result = { ...assessment, reviewed_at: new Date().toISOString(), model: 'claude-haiku-4-5-20251001' }
+  const result = { ...assessment, reviewed_at: new Date().toISOString(), model: REVIEW_MODEL }
 
   const { error } = await supabase
     .from('doe_match_candidates')

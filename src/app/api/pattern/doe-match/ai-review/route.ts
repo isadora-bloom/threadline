@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { REVIEW_MODEL } from '@/lib/ai-models'
 
 export const maxDuration = 60
 
@@ -73,7 +74,7 @@ async function reviewOne(supabase: Awaited<ReturnType<typeof createClient>>, mat
   if (!mRaw?.raw_text || !uRaw?.raw_text) return null
 
   const msg = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: REVIEW_MODEL,
     max_tokens: 512,
     system: SYSTEM_PROMPT,
     messages: [{
@@ -99,7 +100,7 @@ async function reviewOne(supabase: Awaited<ReturnType<typeof createClient>>, mat
     }
   } catch { /* keep default */ }
 
-  const result = { ...assessment, reviewed_at: new Date().toISOString(), model: 'claude-haiku-4-5-20251001' }
+  const result = { ...assessment, reviewed_at: new Date().toISOString(), model: REVIEW_MODEL }
 
   await supabase
     .from('doe_match_candidates' as never)
@@ -148,7 +149,7 @@ Respond with JSON only:
 
     try {
       const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: REVIEW_MODEL,
         max_tokens: 512,
         system: tattooPrompt,
         messages: [{
@@ -168,7 +169,7 @@ Respond with JSON only:
         }
       } catch { /* keep default */ }
 
-      const result = { ...assessment, reviewed_at: new Date().toISOString(), model: 'claude-haiku-4-5-20251001' }
+      const result = { ...assessment, reviewed_at: new Date().toISOString(), model: REVIEW_MODEL }
 
       // Store reasoning on queue item
       if (queueItemId) {

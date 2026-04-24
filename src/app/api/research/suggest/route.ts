@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { RESEARCH_MODEL } from '@/lib/ai-models'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -119,7 +120,7 @@ Return JSON (no markdown):
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-opus-4-6',
+      model: RESEARCH_MODEL,
       max_tokens: 2048,
       messages: [{ role: 'user', content: prompt }],
     })

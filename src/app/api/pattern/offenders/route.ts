@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { REVIEW_MODEL } from '@/lib/ai-models'
 
 export const maxDuration = 60
 
@@ -224,7 +225,7 @@ export async function POST(req: NextRequest) {
       const { default: Anthropic } = await import('@anthropic-ai/sdk')
       const anthropic = new Anthropic({ apiKey })
       const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: REVIEW_MODEL,
         max_tokens: 700,
         system: OFFENDER_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: `OFFENDER PROFILE:\n${offenderProfile}\n\n---\n\nCASE RECORD:\n${sub.raw_text}\n\n---\n\nPattern overlap score: ${overlap.composite_score}/100. Matched MO keywords: ${(overlap.matched_mo_keywords ?? []).join(', ') || 'none'}.` }],
@@ -241,7 +242,7 @@ export async function POST(req: NextRequest) {
         }
       } catch { /* keep default */ }
 
-      const result = { ...assessment, reviewed_at: new Date().toISOString(), model: 'claude-haiku-4-5-20251001' }
+      const result = { ...assessment, reviewed_at: new Date().toISOString(), model: REVIEW_MODEL }
       await supabase.from('offender_case_overlaps' as never).update({ ai_assessment: result } as never)
         .eq('offender_id', offender_id as never).eq('submission_id', submission_id as never)
       reviewed++
@@ -290,7 +291,7 @@ export async function POST(req: NextRequest) {
   const anthropic = new Anthropic({ apiKey })
 
   const msg = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: REVIEW_MODEL,
     max_tokens: 700,
     system: OFFENDER_SYSTEM_PROMPT,
     messages: [{
@@ -310,7 +311,7 @@ export async function POST(req: NextRequest) {
     }
   } catch { /* keep default */ }
 
-  const result = { ...assessment, reviewed_at: new Date().toISOString(), model: 'claude-haiku-4-5-20251001' }
+  const result = { ...assessment, reviewed_at: new Date().toISOString(), model: REVIEW_MODEL }
 
   await supabase.from('offender_case_overlaps' as never).update({ ai_assessment: result } as never)
     .eq('offender_id', offenderId as never).eq('submission_id', submissionId as never)

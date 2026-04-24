@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { RESEARCH_MODEL } from '@/lib/ai-models'
 
 export const maxDuration = 120 // Vercel Pro allows up to 300s; this gives the loop room to breathe
 
@@ -201,7 +202,7 @@ ${task.context ? `ADDITIONAL CONTEXT: ${task.context}` : ''}`
 
     try {
       const resp = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001', // Fast mode: Haiku completes in ~20s vs Sonnet's 60-90s
+        model: RESEARCH_MODEL, // Fast mode: Haiku completes in ~20s vs Sonnet's 60-90s
         max_tokens: 3000,
         tools: [{
           name: 'submit_research_findings',
@@ -300,7 +301,7 @@ RULES:
   let currentQueries: string[] = []
   try {
     const planResp = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: RESEARCH_MODEL,
       max_tokens: 600,
       messages: [{
         role: 'user',
@@ -358,7 +359,7 @@ Return ONLY a JSON array of ${QUERIES_PER_ROUND} search query strings. Most spec
     // Ask Claude: given what we found, what should we follow up on?
     try {
       const followupResp = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: RESEARCH_MODEL,
         max_tokens: 500,
         messages: [{
           role: 'user',
@@ -461,7 +462,7 @@ Return JSON only (no preamble, no markdown):
 
   try {
     const synthResp = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: RESEARCH_MODEL,
       max_tokens: 2048,
       tools: [{
         name: 'submit_synthesis',

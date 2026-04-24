@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { EXTRACTION_MODEL } from '@/lib/ai-models'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -102,7 +103,7 @@ Return only the JSON object, no markdown fences.`
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-opus-4-6',
+      model: EXTRACTION_MODEL,
       max_tokens: 4096,
       messages: [
         {

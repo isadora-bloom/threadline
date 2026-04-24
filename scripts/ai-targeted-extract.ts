@@ -23,6 +23,7 @@ import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
+import { EXTRACTION_MODEL, SCORING_MODEL } from '../src/lib/ai-models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,9 +40,10 @@ const LIMIT = limitIdx !== -1 ? parseInt(args[limitIdx + 1]) : 100
 const modelIdx = args.indexOf('--model')
 const MODEL_FLAG = modelIdx !== -1 ? args[modelIdx + 1] : 'haiku'
 
-const MODEL = MODEL_FLAG === 'sonnet'
-  ? 'claude-sonnet-4-6-20250514'
-  : 'claude-haiku-4-5-20251001'
+// --model sonnet switches to the higher-quality extraction model; default is
+// the lighter one. Override either via env (THREADLINE_SCORING_MODEL /
+// THREADLINE_EXTRACTION_MODEL).
+const MODEL = MODEL_FLAG === 'sonnet' ? SCORING_MODEL : EXTRACTION_MODEL
 
 const DELAY_MS = MODEL_FLAG === 'haiku' ? 500 : 1500
 

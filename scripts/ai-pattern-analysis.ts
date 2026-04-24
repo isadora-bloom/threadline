@@ -21,6 +21,7 @@ import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
 import { createClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
+import { REVIEW_MODEL } from '../src/lib/ai-models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -432,7 +433,7 @@ Scoring guide:
 
     try {
       const response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: REVIEW_MODEL,
         max_tokens: 500,
         messages: [{ role: 'user', content: prompt }],
       })
@@ -449,7 +450,7 @@ Scoring guide:
           signals: ext,
           ai_summary: result.reasoning,
           ai_next_steps: result.next_steps ?? [],
-          model_used: 'claude-haiku-4-5-20251001',
+          model_used: REVIEW_MODEL,
           computed_at: new Date().toISOString(),
         }, { onConflict: 'import_record_id' })
 

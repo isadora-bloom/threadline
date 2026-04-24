@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
+import { RESEARCH_MODEL } from '@/lib/ai-models'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -161,7 +162,7 @@ Limit to 5 threads maximum. Focus on quality over quantity. If fewer than 3 trac
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-opus-4-6',
+      model: RESEARCH_MODEL,
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -199,7 +200,7 @@ Limit to 5 threads maximum. Focus on quality over quantity. If fewer than 3 trac
     external_resources: t.external_resources ?? [],
     status: 'unreviewed',
     generated_by: user.id,
-    generation_model: 'claude-opus-4-6',
+    generation_model: RESEARCH_MODEL,
   }))
 
   const { data: inserted, error: insertError } = await supabase
@@ -220,7 +221,7 @@ Limit to 5 threads maximum. Focus on quality over quantity. If fewer than 3 trac
     target_type: 'case',
     target_id: caseId,
     case_id: caseId,
-    notes: `AI generated ${threads.length} investigative thread${threads.length !== 1 ? 's' : ''} (batch ${batchId}). Model: claude-opus-4-6. Claims used: ${claims.length}. Entities: ${entities.length}. Pattern flags: ${flags.length}.`,
+    notes: `AI generated ${threads.length} investigative thread${threads.length !== 1 ? 's' : ''} (batch ${batchId}). Model: ${RESEARCH_MODEL}. Claims used: ${claims.length}. Entities: ${entities.length}. Pattern flags: ${flags.length}.`,
   })
 
   return NextResponse.json({
