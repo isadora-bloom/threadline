@@ -9,7 +9,6 @@ export type SubmissionFile = Tables<'submission_files'>
 export type Claim = Tables<'claims'>
 export type Entity = Tables<'entities'>
 export type ClaimEntityLink = Tables<'claim_entity_links'>
-export type Event = Tables<'events'>
 export type ReviewAction = Tables<'review_actions'>
 export type ExportRecord = Tables<'export_records'>
 export type UserProfile = Tables<'user_profiles'>
@@ -21,8 +20,6 @@ export type PersonRelationship = Tables<'person_relationships'>
 export type CaseLinkageScore = Tables<'case_linkage_scores'>
 export type CasePatternSettings = Tables<'case_pattern_settings'>
 export type CaseInvitation = Tables<'case_invitations'>
-export type ClaimTemplate = Tables<'claim_templates'>
-export type SubmissionSimilarity = Tables<'submission_similarity'>
 
 // Enum types
 export type CaseType = Enums<'case_type'>
@@ -44,7 +41,6 @@ export type AuditTargetType = Enums<'audit_target_type'>
 export type ExportScope = Enums<'export_scope'>
 export type RecipientType = Enums<'recipient_type'>
 export type ExportFormat = Enums<'export_format'>
-export type EventStatus = Enums<'event_status'>
 export type DatePrecision = Enums<'date_precision'>
 
 // ============================================================
