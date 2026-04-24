@@ -172,13 +172,29 @@ async function main() {
       .join(', ')
     const more = cluster.refs.length > 5 ? `, +${cluster.refs.length - 5} more` : ''
 
-    await supabase.from('intelligence_queue').insert({
-      queue_type: 'shared_associate',
+    // Use the existing 'entity_crossmatch' queue_type: CHECK constraint
+    // restricts the allowed values. details.kind='shared_associate' keeps the
+    // finer classification for UI filtering.
+    // Idempotency: same entity already flagged? Skip. Uses details.kind +
+    // entity_value rather than title to survive phrasing tweaks.
+    const entityKey = `${cluster.type}:${cluster.normValue}`
+    const { data: existingQ } = await supabase
+      .from('intelligence_queue')
+      .select('id, details')
+      .eq('queue_type', 'entity_crossmatch')
+      .contains('details', { kind: 'shared_associate', entity_value: cluster.normValue })
+      .limit(1)
+    if (existingQ && existingQ.length > 0) continue
+    void entityKey
+
+    const { error: insertErr } = await supabase.from('intelligence_queue').insert({
+      queue_type: 'entity_crossmatch',
       priority_score: priority,
       priority_grade: priority >= 75 ? 'high' : 'medium',
       title: `Shared ${typeLabel}: "${cluster.normValue}" appears in ${cluster.refs.length} cases`,
       summary: `A ${typeLabel} entity "${cluster.normValue}" is mentioned in ${cluster.refs.length} cases (${stateSummary}): ${peopleLine}${more}. Could be a shared associate, witness, or vehicle — or could be name collision. Requires human review.`,
       details: {
+        kind: 'shared_associate',
         entity_type: cluster.type,
         entity_value: cluster.normValue,
         state_concentration: sameStateConcentration,
@@ -194,6 +210,10 @@ async function main() {
       signal_count: cluster.refs.length,
       ai_confidence: sameStateConcentration ? 0.7 : 0.4,
     })
+    if (insertErr) {
+      console.error(`  Insert failed for ${cluster.key}: ${insertErr.message}`)
+      continue
+    }
     flagged++
   }
 
