@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createHash } from 'crypto'
 import Anthropic from '@anthropic-ai/sdk'
 
 export const maxDuration = 60
@@ -60,9 +61,13 @@ export async function POST(req: NextRequest) {
       prompt = buildResearchPrompt(record, context, webResults)
     }
 
+    const modelId = 'claude-haiku-4-5-20251001'
+    const maxTokens = 4096
+    const promptHash = createHash('sha256').update(prompt).digest('hex')
+
     const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
+      model: modelId,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }],
     }).catch(err => {
       console.error('Anthropic API error:', err.message ?? err)
@@ -115,8 +120,10 @@ export async function POST(req: NextRequest) {
         completed_at: new Date().toISOString(),
         summary: findings.executive_summary ?? findings.summary ?? '',
         findings,
-        model_used: 'claude-haiku-4-5',
+        model_used: modelId,
         tokens_used: response.usage?.output_tokens ?? 0,
+        prompt_hash: promptHash,
+        model_config: { model: modelId, max_tokens: maxTokens },
       })
       .eq('id', researchTask.id)
 
@@ -513,7 +520,7 @@ IMPORTANT: Keep the JSON compact. Do not write long paragraphs in each field. Be
   "executive_summary": "What happened, what was missed, what should happen next. 3-4 sentences max.",
 
   "connections": [
-    { "name": "case or person", "reasoning": "why connected — specific evidence", "confidence": "low|medium|high" }
+    { "name": "case or person", "reasoning": "why connected - specific evidence", "confidence": "low|medium|high", "source_type": "fact|claim|inference", "source_urls": ["URL(s) that support this connection, or empty if from database only"] }
   ],
 
   "next_steps": [
@@ -521,7 +528,7 @@ IMPORTANT: Keep the JSON compact. Do not write long paragraphs in each field. Be
   ],
 
   "red_flags": [
-    { "flag": "what is concerning", "severity": "high|medium" }
+    { "flag": "what is concerning", "severity": "high|medium", "source_type": "fact|claim|inference", "source_urls": ["URL(s) that support this flag, or empty if from database only"] }
   ],
 
   "unanswered_questions": ["specific questions that would break the case"],
@@ -551,7 +558,8 @@ Return ONLY the JSON, no markdown fences.
 
 CRITICAL RULES:
 - Reference tattoo/mark matches from the data above in connections.
-- Cite web search results in web_findings. ALWAYS include the actual URL in the "source" field — never paraphrase a URL or omit it. If you cannot provide the URL, say "source not available."
+- Cite web search results in web_findings. ALWAYS include the actual URL in the "source" field. If you cannot provide the URL, say "source not available."
+- For every connection and red_flag, set source_type to "fact" (from database), "claim" (from web), or "inference" (your reasoning). If a web source supports it, include the URL in source_urls. Leave source_urls as [] if based only on database or inference.
 - Flag classification issues.
 - Every sentence specific to THIS case.
 

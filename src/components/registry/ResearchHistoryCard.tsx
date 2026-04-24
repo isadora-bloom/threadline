@@ -8,6 +8,30 @@ import { Brain, ChevronDown, ChevronUp, Loader2, Search, Shield, Users, Sparkles
 
 const PREVIEW_COUNT = 3
 
+const SOURCE_TYPE_STYLE: Record<string, string> = {
+  fact:      'bg-emerald-100 text-emerald-700',
+  claim:     'bg-amber-100 text-amber-700',
+  inference: 'bg-slate-100 text-slate-600',
+}
+
+function SourceBadge({ type, urls }: { type?: string; urls?: string[] }) {
+  if (!type) return null
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap">
+      <span className={`text-[9px] px-1 py-0 rounded font-medium ${SOURCE_TYPE_STYLE[type] ?? SOURCE_TYPE_STYLE.inference}`}>
+        {type}
+      </span>
+      {urls && urls.length > 0 && urls.map((u, i) => (
+        typeof u === 'string' && u.startsWith('http') ? (
+          <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="text-[9px] text-indigo-500 hover:underline truncate max-w-[180px]" title={u}>
+            [{i + 1}]
+          </a>
+        ) : null
+      ))}
+    </span>
+  )
+}
+
 function ExpandableSection({
   items,
   renderItem,
@@ -150,7 +174,7 @@ function RunFindings({
               return (
                 <div key={i} className="p-2 bg-blue-50 rounded mb-1 text-xs text-blue-800">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       <span className="font-medium">{connectionName}</span>
                       {c.confidence && (
                         <span className={`text-[10px] px-1 py-0.5 rounded ${
@@ -159,6 +183,7 @@ function RunFindings({
                           'bg-slate-100 text-slate-600'
                         }`}>{c.confidence as string}</span>
                       )}
+                      <SourceBadge type={c.source_type as string} urls={c.source_urls as string[]} />
                     </div>
                     <AiGoButton
                       recordId={recordId}
@@ -218,10 +243,11 @@ function RunFindings({
             renderItem={(item, i) => {
               const f = item as Record<string, unknown>
               return (
-                <p key={i} className="text-xs text-red-700 mb-1">
-                  {(f.flag ?? f.description) as string}
+                <div key={i} className="text-xs text-red-700 mb-1">
+                  <span>{(f.flag ?? f.description) as string}</span>
                   {f.severity && <span className={`ml-1 text-[10px] ${f.severity === 'high' ? 'font-bold' : ''}`}>({f.severity as string})</span>}
-                </p>
+                  {' '}<SourceBadge type={f.source_type as string} urls={f.source_urls as string[]} />
+                </div>
               )
             }}
           />
