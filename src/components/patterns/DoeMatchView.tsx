@@ -372,7 +372,17 @@ function MatchCard({ match, onReview }: {
     <Collapsible open={open} onOpenChange={setOpen}>
       <Card className={`overflow-hidden transition-opacity ${isDismissed ? 'opacity-40' : ''} ${aiCardCls}`}>
         <CollapsibleTrigger asChild>
-          <button className="w-full text-left">
+          <div
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setOpen((o) => !o)
+              }
+            }}
+            className="w-full text-left cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1"
+          >
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
                 {/* Score */}
@@ -490,7 +500,7 @@ function MatchCard({ match, onReview }: {
                 <ScoreBar score={match.composite_score} grade={match.grade} />
               </div>
             </CardContent>
-          </button>
+          </div>
         </CollapsibleTrigger>
 
         <CollapsibleContent>
@@ -995,7 +1005,17 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
     <Collapsible open={open} onOpenChange={handleOpenChange}>
       <Card className={`overflow-hidden border-l-4 ${borderColor}`}>
         <CollapsibleTrigger asChild>
-          <button className="w-full text-left">
+          <div
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleOpenChange(!open)
+              }
+            }}
+            className="w-full text-left cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1"
+          >
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
                 <div className={`flex-shrink-0 ${iconBg} rounded-full p-2`}>
@@ -1138,7 +1158,7 @@ function ClusterCard({ cluster, missingCaseId, onReview, onSynthesize, onReviewM
                 </div>
               )}
             </CardContent>
-          </button>
+          </div>
         </CollapsibleTrigger>
 
         <CollapsibleContent>

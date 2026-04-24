@@ -58,16 +58,35 @@ export function CaseHandoff({ recordId, personName }: { recordId: string; person
   const [tipLine, setTipLine] = useState('')
   const [customSummary, setCustomSummary] = useState('')
 
-  // Fetch existing handoffs
+  // Fetch existing handoffs. Can't FK-embed user_profiles because case_handoffs.created_by
+  // references auth.users, not user_profiles, so PostgREST has no relationship to traverse.
   const { data: handoffs } = useQuery({
     queryKey: ['handoffs', recordId],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data: rows } = await supabase
         .from('case_handoffs')
-        .select('*, submitter:user_profiles!case_handoffs_created_by_fkey(full_name)')
+        .select('*')
         .eq('import_record_id', recordId)
         .order('created_at', { ascending: false })
-      return data ?? []
+
+      const raw = rows ?? []
+      const creatorIds = Array.from(
+        new Set(raw.map((r) => r.created_by).filter((id): id is string => !!id))
+      )
+
+      let nameById = new Map<string, string | null>()
+      if (creatorIds.length) {
+        const { data: profiles } = await supabase
+          .from('user_profiles')
+          .select('id, full_name')
+          .in('id', creatorIds)
+        nameById = new Map((profiles ?? []).map((p) => [p.id, p.full_name]))
+      }
+
+      return raw.map((r) => ({
+        ...r,
+        submitter: { full_name: r.created_by ? nameById.get(r.created_by) ?? null : null },
+      }))
     },
   })
 
