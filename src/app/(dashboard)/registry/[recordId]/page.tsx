@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { ensurePersonalWorkspace } from '@/lib/personal-workspace'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +20,7 @@ import {
   Flame,
   Star,
   Users,
+  Zap,
 } from 'lucide-react'
 import { WatchButton } from '@/components/registry/WatchButton'
 import { DeepResearchButton } from '@/components/registry/DeepResearchButton'
@@ -26,6 +28,7 @@ import { TagButton } from '@/components/registry/TagButton'
 import { CaseHandoff } from '@/components/registry/CaseHandoff'
 import { ResearchHistoryCard } from '@/components/registry/ResearchHistoryCard'
 import { ShareCaseButton } from '@/components/registry/ShareCaseButton'
+import { QuickCapture } from '@/components/submissions/QuickCapture'
 
 export default async function RegistryProfilePage({
   params,
@@ -243,6 +246,12 @@ export default async function RegistryProfilePage({
     is_me: row.user_id === user.id,
   }))
 
+  // Personal workspace — lazily resolved so the QuickCapture button on this
+  // page can pre-bind a case_id. First visit creates the workspace; later
+  // visits hit the unique-index lookup. null means the create failed and we
+  // fall back to hiding the button.
+  const workspaceCaseId = await ensurePersonalWorkspace(supabase, user.id, user.email)
+
   const source = record.source as { display_name: string; slug: string; base_url: string } | null
 
   return (
@@ -344,6 +353,22 @@ export default async function RegistryProfilePage({
               userId={user.id}
             />
             <DeepResearchButton recordId={recordId} isWatching={!!isWatching} />
+            {workspaceCaseId && (
+              <QuickCapture
+                caseId={workspaceCaseId}
+                trigger={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    title="Drop a screenshot or paste text — AI extracts entities and claims into your personal workspace"
+                  >
+                    <Zap className="h-4 w-4" />
+                    Quick capture
+                  </Button>
+                }
+              />
+            )}
           </div>
           <TagButton importRecordId={recordId} />
         </div>

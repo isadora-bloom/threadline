@@ -147,6 +147,28 @@ export function QuickCapture({ caseId: initialCaseId, trigger }: Props) {
     if (initialCaseId) setSelectedCaseId(initialCaseId)
   }, [initialCaseId])
 
+  // When invoked with a pre-set case, fetch its title so we can show users
+  // exactly where their content will land (e.g., "Filing into Sam's workspace"
+  // vs the ambiguous "Filing into current case").
+  const [initialCaseTitle, setInitialCaseTitle] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open || !initialCaseId) {
+      setInitialCaseTitle(null)
+      return
+    }
+    let cancelled = false
+    const load = async () => {
+      const { data } = await supabase
+        .from('cases')
+        .select('title')
+        .eq('id', initialCaseId)
+        .single()
+      if (!cancelled) setInitialCaseTitle((data as { title: string } | null)?.title ?? null)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [open, initialCaseId, supabase])
+
   // Fetch cases when dialog opens and no caseId is pre-selected
   useEffect(() => {
     if (!open || initialCaseId) return
@@ -373,7 +395,8 @@ export function QuickCapture({ caseId: initialCaseId, trigger }: Props) {
             {/* Filing target label when pre-selected */}
             {initialCaseId && (
               <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                <span>Filing into current case</span>
+                <span>Filing into</span>
+                <span className="font-medium text-slate-700">{initialCaseTitle ?? 'current case'}</span>
               </div>
             )}
 
