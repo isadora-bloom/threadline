@@ -28,6 +28,7 @@ import { TagButton } from '@/components/registry/TagButton'
 import { CaseHandoff } from '@/components/registry/CaseHandoff'
 import { ResearchHistoryCard } from '@/components/registry/ResearchHistoryCard'
 import { ShareCaseButton } from '@/components/registry/ShareCaseButton'
+import { DossierButton } from '@/components/registry/DossierButton'
 import { QuickCapture } from '@/components/submissions/QuickCapture'
 
 export default async function RegistryProfilePage({
@@ -388,8 +389,9 @@ export default async function RegistryProfilePage({
         </div>
 
         <div className="flex flex-col gap-2 flex-shrink-0 items-end">
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
             <ShareCaseButton recordId={recordId} />
+            <DossierButton recordId={recordId} />
             <WatchButton
               recordId={recordId}
               isWatching={!!isWatching}
