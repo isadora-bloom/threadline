@@ -246,6 +246,49 @@ export default async function RegistryProfilePage({
     is_me: row.user_id === user.id,
   }))
 
+  // Sibling records — same case tracked by another registry. Pulled from
+  // record_siblings (populated by scripts/link-charley-namus.ts). Charley
+  // narratives in particular are paragraphs longer than NamUs and worth
+  // surfacing on a NamUs profile (and vice versa).
+  type SiblingLinkRow = { record_a_id: string; record_b_id: string; link_type: string; confidence: number }
+  const { data: siblingLinks } = await supabase
+    .from('record_siblings')
+    .select('record_a_id, record_b_id, link_type, confidence')
+    .or(`record_a_id.eq.${recordId},record_b_id.eq.${recordId}`)
+    .order('confidence', { ascending: false })
+    .limit(5) as unknown as { data: SiblingLinkRow[] | null }
+
+  const siblingIds = (siblingLinks ?? [])
+    .map(l => (l.record_a_id === recordId ? l.record_b_id : l.record_a_id))
+
+  type SiblingRow = {
+    id: string
+    person_name: string | null
+    state: string | null
+    date_missing: string | null
+    date_found: string | null
+    circumstances_summary: string | null
+    classification: string | null
+    raw_data: Record<string, unknown> | null
+    source: { display_name: string; slug: string } | null
+  }
+  let siblings: Array<SiblingRow & { link_type: string; confidence: number }> = []
+  if (siblingIds.length > 0) {
+    const { data: siblingRecords } = await supabase
+      .from('import_records')
+      .select('id, person_name, state, date_missing, date_found, circumstances_summary, classification, raw_data, source:import_sources(display_name, slug)')
+      .in('id', siblingIds) as unknown as { data: SiblingRow[] | null }
+    const byId = new Map((siblingRecords ?? []).map(r => [r.id, r]))
+    siblings = (siblingLinks ?? [])
+      .map(l => {
+        const otherId = l.record_a_id === recordId ? l.record_b_id : l.record_a_id
+        const other = byId.get(otherId)
+        if (!other) return null
+        return { ...other, link_type: l.link_type, confidence: l.confidence }
+      })
+      .filter((s): s is SiblingRow & { link_type: string; confidence: number } => !!s)
+  }
+
   // Personal workspace — lazily resolved so the QuickCapture button on this
   // page can pre-bind a case_id. First visit creates the workspace; later
   // visits hit the unique-index lookup. null means the create failed and we
@@ -450,6 +493,92 @@ export default async function RegistryProfilePage({
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
           <span className="font-medium">AI-extracted data</span> — The structured information below was extracted by AI and has not been verified by a human. Original source data is preserved.
         </div>
+      )}
+
+      {/* Sibling records — same case tracked by another registry */}
+      {siblings.length > 0 && (
+        <Card className="border-emerald-200 bg-emerald-50/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-emerald-700" />
+              Also tracked by {siblings.map(s => s.source?.display_name).filter(Boolean).join(', ') || 'another registry'}
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              The same case appears in {siblings.length} other {siblings.length === 1 ? 'registry' : 'registries'}.
+              Different sources often carry different details — read both.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {siblings.map((s) => {
+              const raw = (s.raw_data ?? {}) as Record<string, unknown>
+              const detailsOfDisappearance = raw.details_of_disappearance as string | undefined
+              const distinguishingChars = raw.distinguishing_characteristics as string | undefined
+              const investigatingAgency = raw.investigating_agency as string | undefined
+              const sourceLinks = raw.source_links as Array<string | { url?: string; title?: string }> | undefined
+              const isExplicit = s.link_type === 'explicit_id'
+              return (
+                <div key={s.id} className="rounded-md bg-white border border-emerald-100 p-3">
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-800 border-emerald-200">
+                      {s.source?.display_name ?? 'Other source'}
+                    </Badge>
+                    {!isExplicit && (
+                      <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-300 bg-amber-50">
+                        fuzzy match · verify
+                      </Badge>
+                    )}
+                    <Link
+                      href={`/registry/${s.id}`}
+                      className="text-xs text-indigo-600 hover:underline ml-auto"
+                    >
+                      Open profile →
+                    </Link>
+                  </div>
+                  {detailsOfDisappearance ? (
+                    <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {detailsOfDisappearance}
+                    </p>
+                  ) : s.circumstances_summary ? (
+                    <p className="text-sm text-slate-700 leading-relaxed">{s.circumstances_summary}</p>
+                  ) : (
+                    <p className="text-sm text-slate-400 italic">No narrative recorded by this source.</p>
+                  )}
+                  {(distinguishingChars || investigatingAgency || (sourceLinks && sourceLinks.length > 0)) && (
+                    <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-xs text-slate-600">
+                      {distinguishingChars && (
+                        <p><span className="text-slate-400">Distinguishing:</span> {distinguishingChars}</p>
+                      )}
+                      {investigatingAgency && (
+                        <p><span className="text-slate-400">Agency:</span> {investigatingAgency}</p>
+                      )}
+                      {sourceLinks && sourceLinks.length > 0 && (
+                        <p>
+                          <span className="text-slate-400">External:</span>{' '}
+                          {sourceLinks.slice(0, 3).map((link, i) => {
+                            const url = typeof link === 'string' ? link : link.url
+                            const title = typeof link === 'string' ? null : link.title
+                            if (!url) return null
+                            return (
+                              <a
+                                key={i}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-indigo-600 hover:underline mr-2"
+                              >
+                                {title ?? new URL(url).hostname}
+                              </a>
+                            )
+                          })}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid lg:grid-cols-3 gap-6">
