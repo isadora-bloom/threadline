@@ -97,7 +97,8 @@ export function Sidebar() {
     router.push('/login')
   }
 
-  // Intelligence queue count
+  // Intelligence queue count — actionable leads only. data_quality_* flags
+  // are background cleanup work and would otherwise dominate the badge.
   const { data: queueCount } = useQuery({
     queryKey: ['intelligence-queue-count'],
     queryFn: async () => {
@@ -105,6 +106,7 @@ export function Sidebar() {
         .from('intelligence_queue')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'new')
+        .not('details->>kind', 'ilike', 'data_quality_%')
       return count ?? 0
     },
   })

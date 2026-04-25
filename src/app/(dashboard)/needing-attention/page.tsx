@@ -105,42 +105,47 @@ export default async function NeedingAttentionPage() {
 
   const watchingSet = new Set(userWatchlist?.map(w => w.import_record_id) ?? [])
 
-  // Data quality: stale records
-  const { data: staleRecords } = await supabase
-    .from('import_records')
-    .select('id, person_name, record_type, state, external_id, source:import_sources(display_name)')
-    .eq('stale', true)
-    .limit(20)
+  // Data quality flags — read from intelligence_queue rows produced by the
+  // nightly data-quality-flag.ts batch. Previously this page ran a 2k-record
+  // JS aggregation on every render, which missed ~95% of the corpus and was
+  // slow on every visit. The batch runs over the full ~60k records and
+  // persists findings.
+  type FlagRow = {
+    id: string
+    title: string
+    summary: string
+    related_import_ids: string[] | null
+    details: Record<string, unknown> | null
+    created_at: string
+  }
+  const { data: dataQualityFlags } = await supabase
+    .from('intelligence_queue')
+    .select('id, title, summary, related_import_ids, details, created_at')
+    .eq('queue_type', 'contradiction')
+    .order('priority_score', { ascending: false })
+    .limit(60) as unknown as { data: FlagRow[] | null }
 
-  // Data quality: potential cross-source duplicates
-  // Find person_name + sex + state combos that appear in multiple sources
-  const { data: dupeCheckRaw } = await supabase
-    .from('import_records')
-    .select('id, person_name, sex, state, record_type, external_id, source_id, source:import_sources(display_name, slug)')
-    .not('person_name', 'is', null)
-    .eq('record_type', 'missing_person')
-    .order('person_name')
-    .limit(2000)
-
-  // Group by normalized name+sex+state, flag combos with multiple source_ids
-  const dupeGroups: Array<{ key: string; records: typeof dupeCheckRaw }> = []
-  if (dupeCheckRaw?.length) {
-    const byKey: Record<string, typeof dupeCheckRaw> = {}
-    for (const r of dupeCheckRaw) {
-      if (!r.person_name || r.person_name === 'Unknown') continue
-      const key = `${(r.person_name as string).toLowerCase().trim()}|${(r.sex as string ?? '').toLowerCase()}|${(r.state as string ?? '').toLowerCase()}`
-      if (!byKey[key]) byKey[key] = []
-      byKey[key]!.push(r)
-    }
-    for (const [key, recs] of Object.entries(byKey)) {
-      const sourceIds = new Set(recs!.map(r => r.source_id))
-      if (sourceIds.size > 1) {
-        dupeGroups.push({ key, records: recs! })
-      }
-    }
+  const staleFlags: FlagRow[] = []
+  const dupeFlags: FlagRow[] = []
+  for (const f of dataQualityFlags ?? []) {
+    const kind = (f.details ?? {} as Record<string, unknown>).kind
+    if (kind === 'data_quality_stale') staleFlags.push(f)
+    else if (kind === 'data_quality_dupe') dupeFlags.push(f)
   }
 
-  const hasDataQuality = (staleRecords?.length ?? 0) > 0 || dupeGroups.length > 0
+  // Pull person_name + state for stale-flag display in one batched call.
+  const staleIds = staleFlags.flatMap(f => f.related_import_ids ?? [])
+  type RecRow = { id: string; person_name: string | null; record_type: string; state: string | null; external_id: string }
+  const recordsById = new Map<string, RecRow>()
+  if (staleIds.length > 0) {
+    const { data } = await supabase
+      .from('import_records')
+      .select('id, person_name, record_type, state, external_id')
+      .in('id', staleIds)
+    for (const r of (data ?? []) as RecRow[]) recordsById.set(r.id, r)
+  }
+
+  const hasDataQuality = staleFlags.length > 0 || dupeFlags.length > 0
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -300,80 +305,86 @@ export default async function NeedingAttentionPage() {
           </div>
 
           {/* Stale records */}
-          {staleRecords && staleRecords.length > 0 && (
+          {staleFlags.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-1.5">
                 <RefreshCw className="h-4 w-4" />
-                Stale Records ({staleRecords.length})
+                Stale Records ({staleFlags.length})
               </h3>
               <p className="text-xs text-slate-500 mb-2">
                 Source data changed since last import. These records may have outdated information.
               </p>
               <div className="space-y-1.5">
-                {staleRecords.map(r => (
-                  <Link
-                    key={r.id}
-                    href={`/registry/${r.id}`}
-                    className="flex items-center justify-between p-2.5 rounded-md border border-amber-100 bg-amber-50 hover:bg-amber-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-                      <span className="text-sm font-medium text-slate-900 truncate">
-                        {r.person_name ?? r.external_id}
-                      </span>
-                      <span className="text-[10px] text-slate-500">
-                        {r.record_type === 'missing_person' ? 'Missing' : 'Unidentified'}
-                      </span>
-                      {r.state && <span className="text-[10px] text-slate-400">{r.state}</span>}
-                      <span className="text-[10px] text-amber-600">
-                        {(r.source as { display_name: string } | null)?.display_name}
-                      </span>
-                    </div>
-                    <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-                  </Link>
-                ))}
+                {staleFlags.slice(0, 30).map(flag => {
+                  const recordId = (flag.related_import_ids ?? [])[0]
+                  const record = recordId ? recordsById.get(recordId) : null
+                  const ext = (flag.details ?? {} as Record<string, unknown>).external_id as string | undefined
+                  return (
+                    <Link
+                      key={flag.id}
+                      href={recordId ? `/registry/${recordId}` : '#'}
+                      className="flex items-center justify-between p-2.5 rounded-md border border-amber-100 bg-amber-50 hover:bg-amber-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                        <span className="text-sm font-medium text-slate-900 truncate">
+                          {record?.person_name ?? ext ?? 'Record'}
+                        </span>
+                        {record && (
+                          <span className="text-[10px] text-slate-500">
+                            {record.record_type === 'missing_person' ? 'Missing' : 'Unidentified'}
+                          </span>
+                        )}
+                        {record?.state && <span className="text-[10px] text-slate-400">{record.state}</span>}
+                      </div>
+                      <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                    </Link>
+                  )
+                })}
               </div>
             </div>
           )}
 
           {/* Cross-source duplicates */}
-          {dupeGroups.length > 0 && (
+          {dupeFlags.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-purple-700 mb-2 flex items-center gap-1.5">
                 <AlertTriangle className="h-4 w-4" />
-                Potential Cross-Source Duplicates ({dupeGroups.length})
+                Potential Cross-Source Duplicates ({dupeFlags.length})
               </h3>
               <p className="text-xs text-slate-500 mb-2">
                 Same person name, sex, and state appearing in multiple databases. May be the same case tracked separately, or genuinely different people. Review to confirm.
               </p>
               <div className="space-y-2">
-                {dupeGroups.slice(0, 15).map(group => {
-                  const first = group.records![0]
+                {dupeFlags.slice(0, 15).map(flag => {
+                  const details = (flag.details ?? {}) as Record<string, unknown>
+                  const personName = details.person_name as string | null
+                  const sex = details.sex as string | null
+                  const state = details.state as string | null
+                  const externalIds = (details.external_ids ?? []) as string[]
+                  const ids = flag.related_import_ids ?? []
                   return (
-                    <Card key={group.key} className="border-purple-100">
+                    <Card key={flag.id} className="border-purple-100">
                       <CardContent className="p-3">
                         <div className="flex items-start justify-between mb-1.5">
                           <div>
-                            <span className="text-sm font-semibold text-slate-900">{first.person_name}</span>
+                            <span className="text-sm font-semibold text-slate-900">{personName ?? '(no name)'}</span>
                             <span className="text-xs text-slate-500 ml-2">
-                              {first.sex}{first.state ? ` / ${first.state}` : ''}
+                              {sex ?? '?'}{state ? ` / ${state}` : ''}
                             </span>
                           </div>
                           <Badge className="text-[10px] bg-purple-100 text-purple-700 border-purple-200">
-                            {group.records!.length} records
+                            {ids.length} records
                           </Badge>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {group.records!.map(r => (
+                          {ids.map((rid, i) => (
                             <Link
-                              key={r.id}
-                              href={`/registry/${r.id}`}
+                              key={rid}
+                              href={`/registry/${rid}`}
                               className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-slate-50 border border-slate-200 hover:bg-indigo-50 hover:border-indigo-200 transition-colors"
                             >
-                              <span className="font-medium text-indigo-600">{r.external_id}</span>
-                              <span className="text-slate-400">
-                                {(r.source as { display_name: string } | null)?.display_name}
-                              </span>
+                              <span className="font-medium text-indigo-600">{externalIds[i] ?? rid.slice(0, 8)}</span>
                             </Link>
                           ))}
                         </div>
@@ -381,9 +392,9 @@ export default async function NeedingAttentionPage() {
                     </Card>
                   )
                 })}
-                {dupeGroups.length > 15 && (
+                {dupeFlags.length > 15 && (
                   <p className="text-xs text-slate-400 text-center">
-                    {dupeGroups.length - 15} more potential duplicates not shown
+                    {dupeFlags.length - 15} more potential duplicates not shown
                   </p>
                 )}
               </div>

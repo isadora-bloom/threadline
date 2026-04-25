@@ -22,6 +22,7 @@
     "ai:changes": "npx tsx scripts/classification-change-flag.ts",
     "ai:embed": "npx tsx scripts/compute-embeddings.ts",
     "ai:semantic": "npx tsx scripts/semantic-neighbors.ts",
+    "ai:dq": "npx tsx scripts/data-quality-flag.ts",
     "pipeline:match": "npx tsx scripts/rule-based-match.ts",
     "pipeline:extract": "npx tsx scripts/ai-targeted-extract.ts",
     "pipeline:patterns": "npx tsx scripts/ai-pattern-analysis.ts",
