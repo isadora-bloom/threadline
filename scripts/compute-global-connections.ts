@@ -69,7 +69,27 @@ function normRace(r: string | null): string {
   return r.toLowerCase().trim()
 }
 
-function scoreConnection(missing: ImportRecord, remains: ImportRecord): {
+interface GeoPoint { lat: number; lng: number }
+type GeoMap = Map<string, GeoPoint>
+
+function geoKey(city: string | null, state: string | null): string | null {
+  if (!city || !state) return null
+  return `${city.toLowerCase().trim()}|${state.toLowerCase().trim()}`
+}
+
+// Great-circle distance in miles via haversine.
+function haversineMiles(a: GeoPoint, b: GeoPoint): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const R = 3959 // Earth radius in miles
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2)
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+function scoreConnection(missing: ImportRecord, remains: ImportRecord, geo: GeoMap): {
   score: number
   signals: Record<string, number>
   distance_miles: number | null
@@ -212,10 +232,41 @@ function scoreConnection(missing: ImportRecord, remains: ImportRecord): {
     }
   }
 
+  // Geographic distance — interpreted as travel-from-where-they-vanished to
+  // where-remains-were-found. Not all distances are equally suspicious. Local
+  // crimes cluster near home; vehicular abduction shows up as 100-700 mi.
+  // Beyond that, the signal flattens because matches that far apart are
+  // dominated by noise unless other signals carry them.
+  let distanceMiles: number | null = null
+  const mKey = geoKey(missing.city, missing.state)
+  const rKey = geoKey(remains.city, remains.state)
+  if (mKey && rKey) {
+    const mLoc = geo.get(mKey)
+    const rLoc = geo.get(rKey)
+    if (mLoc && rLoc) {
+      distanceMiles = Math.round(haversineMiles(mLoc, rLoc))
+      if (distanceMiles <= 30) {
+        signals.distance_local = 5 // co-located is itself a signal
+        score += 5
+      } else if (distanceMiles <= 300) {
+        signals.distance_regional = 10
+        score += 10
+      } else if (distanceMiles <= 700) {
+        signals.distance_long = 8
+        score += 8
+      } else if (distanceMiles <= 1500) {
+        signals.distance_very_long = 3
+        score += 3
+      } else {
+        signals.distance_cross_country = 0
+      }
+    }
+  }
+
   // Clamp
   score = Math.max(0, Math.min(100, score))
 
-  return { score, signals, distance_miles: null, days_apart: days }
+  return { score, signals, distance_miles: distanceMiles, days_apart: days }
 }
 
 function gradeScore(score: number): string {
@@ -264,6 +315,27 @@ async function main() {
     return
   }
 
+  // Load city_geocodes once into memory so per-pair distance lookups are O(1).
+  // The table has at most low tens of thousands of rows; fits easily.
+  const geo: GeoMap = new Map()
+  {
+    const PAGE = 1000
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('city_geocodes')
+        .select('city, state, lat, lng')
+        .range(from, from + PAGE - 1)
+      if (error) { console.error('city_geocodes fetch failed:', error.message); break }
+      if (!data?.length) break
+      for (const row of data as Array<{ city: string; state: string; lat: number; lng: number }>) {
+        const key = geoKey(row.city, row.state)
+        if (key) geo.set(key, { lat: row.lat, lng: row.lng })
+      }
+      if (data.length < PAGE) break
+    }
+  }
+  console.log(`Geocodes loaded: ${geo.size}`)
+
   let connectionsCreated = 0
   let queueItemsCreated = 0
   let skipped = 0
@@ -276,7 +348,7 @@ async function main() {
     }
 
     for (const remains of remainsRecords as ImportRecord[]) {
-      const { score, signals, distance_miles, days_apart } = scoreConnection(missing, remains)
+      const { score, signals, distance_miles, days_apart } = scoreConnection(missing, remains, geo)
 
       // Only store connections that are at least moderate
       if (score < 21) continue
@@ -367,6 +439,10 @@ function buildSummary(missing: ImportRecord, remains: ImportRecord, signals: Rec
   if (signals.mark_overlap) supports.push('distinguishing marks overlap')
   if (signals.hair_match) supports.push('hair color matches')
   if (signals.eye_match) supports.push('eye color matches')
+  if (signals.distance_local) supports.push('co-located')
+  else if (signals.distance_regional) supports.push('regional travel (≤300mi)')
+  else if (signals.distance_long) supports.push('long-distance travel (300–700mi, vehicular signal)')
+  else if (signals.distance_very_long) supports.push('very long distance (700–1500mi)')
 
   if (supports.length > 0) {
     parts.push(`Supports: ${supports.join(', ')}.`)
