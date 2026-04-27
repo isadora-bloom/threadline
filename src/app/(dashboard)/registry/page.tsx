@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
@@ -38,14 +39,42 @@ const US_STATES = [
 
 export default function RegistryPage() {
   const supabase = createClient()
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
 
-  const [search, setSearch] = useState('')
+  // Seed search from ?q= so /lookup?q=foo and other inbound links land
+  // pre-filled. Also keep the URL in sync as the user edits so a bookmark
+  // or share captures the current search.
+  const initialQuery = searchParams.get('q') ?? ''
+  const [search, setSearch] = useState(initialQuery)
   const [city, setCity] = useState('')
   const [recordType, setRecordType] = useState<string>('all')
   const [state, setState] = useState<string>('all')
   const [sex, setSex] = useState<string>('all')
   const [page, setPage] = useState(0)
   const PAGE_SIZE = 25
+
+  useEffect(() => {
+    const q = searchParams.get('q') ?? ''
+    if (q !== search) setSearch(q)
+    // intentionally only on URL change, not on local edits
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  // Debounced URL sync so the user's address bar reflects what they
+  // typed without thrashing the history stack on every keystroke.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (search.trim()) params.set('q', search.trim())
+      else params.delete('q')
+      const next = params.toString()
+      router.replace(`${pathname}${next ? '?' + next : ''}`, { scroll: false })
+    }, 400)
+    return () => clearTimeout(handle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
 
   const { data, isLoading } = useQuery({
     queryKey: ['registry', search, city, recordType, state, sex, page],

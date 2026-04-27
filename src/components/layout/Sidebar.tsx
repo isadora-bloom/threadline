@@ -112,8 +112,7 @@ export function Sidebar() {
   })
 
   const mainLinks: Array<{ href: string; label: string; icon: typeof Fingerprint; badge?: number }> = [
-    { href: '/lookup', label: 'Search', icon: Fingerprint },
-    { href: '/registry', label: 'Browse All Cases', icon: Search },
+    { href: '/registry', label: 'Search the Registry', icon: Search },
     { href: '/needing-attention', label: 'Cases That Need You', icon: Flame },
     { href: '/my-watchlist', label: 'My Cases', icon: Star },
     { href: '/intelligence', label: 'Analysis Engine', icon: Brain, badge: queueCount ?? 0 },
@@ -127,7 +126,7 @@ export function Sidebar() {
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-slate-200">
-        <Link href="/lookup" className="flex items-center gap-2">
+        <Link href="/registry" className="flex items-center gap-2">
           <img src="/brand/icon.png" alt="Threadline" className="h-7 w-7 rounded" />
           <span className="text-lg font-bold text-slate-900 tracking-tight">Threadline</span>
         </Link>

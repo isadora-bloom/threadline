@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
 import {
-  Brain, Search, Star, Flame, Fingerprint, BookOpen, Briefcase, User,
+  Brain, Search, Star, Flame, BookOpen, Briefcase, User,
   ChevronRight, Sparkles, ShieldAlert, GitMerge, Globe, MapPin,
   Navigation, Flag, Link2, Users, Microscope,
 } from 'lucide-react'
@@ -20,9 +20,6 @@ export default function GuidePage() {
       <div className="space-y-4">
         <h2 className="text-lg font-semibold text-slate-900">Navigation</h2>
 
-        <NavItem icon={Fingerprint} title="Case Lookup" href="/lookup"
-          description="The quick way in. Enter a NamUs number (MP12345), a person's name, or a city. Get instant results with links to full profiles and AI analysis." />
-
         <NavItem icon={Brain} title="Intelligence" href="/intelligence"
           description="The main analysis workbench. This is where the matching engine lives. 9 tabs:"
           details={[
@@ -37,8 +34,8 @@ export default function GuidePage() {
             { label: 'Research', text: 'Manual and AI-assisted research tasks.' },
           ]} />
 
-        <NavItem icon={Search} title="Registry" href="/registry"
-          description="Browse all 60,000 records. Search by name, city, state. Filter by type (missing/unidentified) and sex. Each record links to a full profile with demographics, circumstances, matches, and AI analysis." />
+        <NavItem icon={Search} title="Search the Registry" href="/registry"
+          description="The way in. Search 60,000+ records by name, NamUs number (MP12345), or city. Filter by state, type (missing/unidentified), and sex. Each record links to a full profile with demographics, circumstances, AI analysis, sibling registries, and a downloadable dossier." />
 
         <NavItem icon={Star} title="My Watchlist" href="/my-watchlist"
           description="Cases you're following (up to 10). Add notes, see who else is investigating, track updates. This is your personal dashboard — the cases you care about." />
@@ -106,7 +103,7 @@ export default function GuidePage() {
           <CardContent className="p-4 space-y-2">
             <p className="text-sm text-indigo-900 font-medium">First time? Start here:</p>
             <ol className="list-decimal list-inside text-sm text-indigo-800 space-y-1.5">
-              <li>Go to <Link href="/lookup" className="underline font-medium">Case Lookup</Link> and search for a name or city you know</li>
+              <li>Go to <Link href="/registry" className="underline font-medium">Search the Registry</Link> and search for a name, NamUs number, or city you know</li>
               <li>Open a profile — read the person&apos;s story, check their matches</li>
               <li>If something interests you, click <strong>Watch</strong> to add it to your watchlist</li>
               <li>Go to <Link href="/intelligence" className="underline font-medium">Intelligence</Link> to see the full analysis — matches, offenders, clusters</li>
