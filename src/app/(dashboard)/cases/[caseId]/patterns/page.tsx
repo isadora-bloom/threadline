@@ -292,11 +292,12 @@ export default function PatternIntelligencePage() {
         )}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — scrollable on mobile, grid on lg+ */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         {roleLoaded && (
-        <TabsList className={`grid w-full max-w-5xl ${canRunAnalysis ? 'grid-cols-10' : 'grid-cols-9'}`}>
-          <TabsTrigger value="flags" className="text-xs">
+        <div className="overflow-x-auto -mx-2 px-2 lg:mx-0 lg:px-0">
+        <TabsList className={`flex w-max gap-1 lg:grid lg:w-full lg:max-w-5xl lg:gap-0 ${canRunAnalysis ? 'lg:grid-cols-10' : 'lg:grid-cols-9'}`}>
+          <TabsTrigger value="flags" className="text-xs whitespace-nowrap">
             <Flag className="h-3.5 w-3.5 mr-1" />
             Flags
             {(summary?.unreviewed_flags ?? 0) > 0 && (
@@ -305,45 +306,46 @@ export default function PatternIntelligencePage() {
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="links" className="text-xs">
+          <TabsTrigger value="links" className="text-xs whitespace-nowrap">
             <Link2 className="h-3.5 w-3.5 mr-1" />
             Connection Scores
           </TabsTrigger>
-          <TabsTrigger value="corridor" className="text-xs">
+          <TabsTrigger value="corridor" className="text-xs whitespace-nowrap">
             <Navigation className="h-3.5 w-3.5 mr-1" />
             Travel Routes
           </TabsTrigger>
-          <TabsTrigger value="network" className="text-xs">
+          <TabsTrigger value="network" className="text-xs whitespace-nowrap">
             <Users className="h-3.5 w-3.5 mr-1" />
             Social Network
           </TabsTrigger>
           {canRunAnalysis && (
-            <TabsTrigger value="cross-case" className="text-xs">
+            <TabsTrigger value="cross-case" className="text-xs whitespace-nowrap">
               <Layers className="h-3.5 w-3.5 mr-1" />
               Cross-Case Links
             </TabsTrigger>
           )}
-          <TabsTrigger value="threads" className="text-xs">
+          <TabsTrigger value="threads" className="text-xs whitespace-nowrap">
             <Sparkles className="h-3.5 w-3.5 mr-1" />
             Threads
           </TabsTrigger>
-          <TabsTrigger value="research" className="text-xs">
+          <TabsTrigger value="research" className="text-xs whitespace-nowrap">
             <Microscope className="h-3.5 w-3.5 mr-1" />
             Research Tasks
           </TabsTrigger>
-          <TabsTrigger value="doe-match" className="text-xs">
+          <TabsTrigger value="doe-match" className="text-xs whitespace-nowrap">
             <GitMerge className="h-3.5 w-3.5 mr-1" />
             Remains Match
           </TabsTrigger>
-          <TabsTrigger value="geo" className="text-xs">
+          <TabsTrigger value="geo" className="text-xs whitespace-nowrap">
             <Globe className="h-3.5 w-3.5 mr-1" />
             Map View
           </TabsTrigger>
-          <TabsTrigger value="offenders" className="text-xs">
+          <TabsTrigger value="offenders" className="text-xs whitespace-nowrap">
             <ShieldAlert className="h-3.5 w-3.5 mr-1" />
             Known Offenders
           </TabsTrigger>
         </TabsList>
+        </div>
         )}
 
         <TabsContent value="flags" className="mt-4">

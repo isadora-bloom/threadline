@@ -373,46 +373,48 @@ export default function IntelligencePage() {
         )}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — scrollable on mobile, grid on lg+ so 9 tabs do not crush text */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full max-w-5xl grid-cols-9">
-          <TabsTrigger value="doe-match" className="text-xs">
-            <GitMerge className="h-3.5 w-3.5 mr-1" />
-            Remains Match
-          </TabsTrigger>
-          <TabsTrigger value="offenders" className="text-xs">
-            <ShieldAlert className="h-3.5 w-3.5 mr-1" />
-            Offenders
-          </TabsTrigger>
-          <TabsTrigger value="geo" className="text-xs">
-            <Globe className="h-3.5 w-3.5 mr-1" />
-            Map
-          </TabsTrigger>
-          <TabsTrigger value="corridor" className="text-xs">
-            <Navigation className="h-3.5 w-3.5 mr-1" />
-            Corridors
-          </TabsTrigger>
-          <TabsTrigger value="flags" className="text-xs">
-            <Flag className="h-3.5 w-3.5 mr-1" />
-            Flags
-          </TabsTrigger>
-          <TabsTrigger value="links" className="text-xs">
-            <Link2 className="h-3.5 w-3.5 mr-1" />
-            Connections
-          </TabsTrigger>
-          <TabsTrigger value="network" className="text-xs">
-            <Users className="h-3.5 w-3.5 mr-1" />
-            Network
-          </TabsTrigger>
-          <TabsTrigger value="threads" className="text-xs">
-            <Sparkles className="h-3.5 w-3.5 mr-1" />
-            Threads
-          </TabsTrigger>
-          <TabsTrigger value="research" className="text-xs">
-            <Microscope className="h-3.5 w-3.5 mr-1" />
-            Research
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-2 px-2 lg:mx-0 lg:px-0">
+          <TabsList className="flex w-max gap-1 lg:grid lg:w-full lg:max-w-5xl lg:grid-cols-9 lg:gap-0">
+            <TabsTrigger value="doe-match" className="text-xs whitespace-nowrap">
+              <GitMerge className="h-3.5 w-3.5 mr-1" />
+              Remains Match
+            </TabsTrigger>
+            <TabsTrigger value="offenders" className="text-xs whitespace-nowrap">
+              <ShieldAlert className="h-3.5 w-3.5 mr-1" />
+              Offenders
+            </TabsTrigger>
+            <TabsTrigger value="geo" className="text-xs whitespace-nowrap">
+              <Globe className="h-3.5 w-3.5 mr-1" />
+              Map
+            </TabsTrigger>
+            <TabsTrigger value="corridor" className="text-xs whitespace-nowrap">
+              <Navigation className="h-3.5 w-3.5 mr-1" />
+              Corridors
+            </TabsTrigger>
+            <TabsTrigger value="flags" className="text-xs whitespace-nowrap">
+              <Flag className="h-3.5 w-3.5 mr-1" />
+              Flags
+            </TabsTrigger>
+            <TabsTrigger value="links" className="text-xs whitespace-nowrap">
+              <Link2 className="h-3.5 w-3.5 mr-1" />
+              Connections
+            </TabsTrigger>
+            <TabsTrigger value="network" className="text-xs whitespace-nowrap">
+              <Users className="h-3.5 w-3.5 mr-1" />
+              Network
+            </TabsTrigger>
+            <TabsTrigger value="threads" className="text-xs whitespace-nowrap">
+              <Sparkles className="h-3.5 w-3.5 mr-1" />
+              Threads
+            </TabsTrigger>
+            <TabsTrigger value="research" className="text-xs whitespace-nowrap">
+              <Microscope className="h-3.5 w-3.5 mr-1" />
+              Research
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="doe-match" className="mt-4">
           <DoeMatchView caseId={caseId} canManage={isAdmin} />

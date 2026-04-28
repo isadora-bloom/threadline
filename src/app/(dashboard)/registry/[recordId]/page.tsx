@@ -312,8 +312,9 @@ export default async function RegistryProfilePage({
         Registry
       </Link>
 
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      {/* Header — stacks on phone so the metadata block doesn't squeeze the
+          action buttons into a half-column */}
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <Badge variant={isMissing ? 'default' : 'secondary'}>
@@ -362,7 +363,7 @@ export default async function RegistryProfilePage({
           <h1 className="text-2xl font-bold text-slate-900">
             {record.person_name ?? 'Unidentified'}
           </h1>
-          <div className="flex items-center gap-4 mt-1 text-sm text-slate-500">
+          <div className="flex items-center gap-x-4 gap-y-1 flex-wrap mt-1 text-sm text-slate-500">
             {record.sex && <span>{record.sex}</span>}
             {record.age_text && <span>Age {record.age_text}</span>}
             {record.race && <span>{record.race}</span>}
@@ -379,7 +380,7 @@ export default async function RegistryProfilePage({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
+          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-2 text-xs text-slate-400">
             <span className="flex items-center gap-1">
               <Eye className="h-3 w-3" />
               {watcherCount ?? 0} watching
@@ -394,8 +395,8 @@ export default async function RegistryProfilePage({
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 flex-shrink-0 items-end">
-          <div className="flex gap-2 flex-wrap justify-end">
+        <div className="flex flex-col gap-2 flex-shrink-0 items-stretch md:items-end">
+          <div className="flex gap-2 flex-wrap md:justify-end">
             <ShareCaseButton recordId={recordId} />
             <DossierButton recordId={recordId} />
             <WatchButton

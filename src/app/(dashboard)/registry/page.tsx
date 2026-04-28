@@ -327,7 +327,7 @@ export default function RegistryPage() {
                             </Badge>
                           )}
                         </div>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1 text-xs text-slate-500">
                           {record.sex && <span>{record.sex}</span>}
                           {record.age_text && <span>Age {record.age_text}</span>}
                           {record.race && <span>{record.race}</span>}
