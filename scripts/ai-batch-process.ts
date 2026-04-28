@@ -142,6 +142,11 @@ Return a JSON object with this structure:
     "has_physical_evidence": false,
     "has_dna_available": false,
     "has_dental_records": false,
+    "evidence_status": {
+      "dental": "exists_entered | exists_not_entered | not_collected | unknown",
+      "dna": "exists_entered | exists_not_entered | not_collected | unknown",
+      "fingerprints": "exists_entered | exists_not_entered | not_collected | unknown"
+    },
     "stall_indicators": ["classified as runaway, voluntary departure with no followup, etc."],
     "investigative_gaps": ["things that should have been done but weren't mentioned"],
     "solvability_score": 0,
@@ -156,6 +161,19 @@ Guidelines:
 - For solvability_score: 0-100. High (70+) = specific leads exist, evidence available. Medium (35-69) = some leads, needs work. Low (<35) = very cold, limited evidence.
 - For stall_indicators: flag if a teen was classified as "runaway" or "voluntary" with no follow-up, if a case was closed quickly, if classification seems wrong.
 - Extract behavioral signals even if subtle — "last seen at a truck stop" = truck_stop keyword.
+
+EVIDENCE STATUS — read this carefully. Existence ≠ entered. The most
+investigatively important question for cold cases is whether collected
+evidence reached the relevant national database. Use these states:
+- exists_entered: source explicitly says the record was uploaded to NCIC,
+  CODIS, AFIS, or the national equivalent ("dental records on file with
+  NamUs", "DNA in CODIS", "fingerprints in AFIS").
+- exists_not_entered: source says records exist locally but does NOT mention
+  national entry, OR explicitly says they were not entered. This is a major
+  red flag and a productive next-step suggestion.
+- not_collected: no records were taken (or remains were not suitable).
+- unknown: cannot tell from the source. Default when unsure — do not guess.
+
 - Return only the JSON object, no markdown fences.
 
 ---
