@@ -111,6 +111,13 @@ Return a JSON object with this structure:
     "body_condition": "intact|partially_decomposed|advanced_decomposition|skeletal|unknown or null"
   },
 
+  "reporter": {
+    "name": "name of the person who reported missing, if any (or null)",
+    "relationship": "one of: family | spouse | partner | ex_partner | parent | child | sibling | friend | employer | neighbor | landlord | police | unknown",
+    "hours_to_report": "estimated number of hours between last contact and the missing-person report being filed; null if unknown",
+    "concerns": "anything notable about the reporting circumstances — lag, who reported vs who knew them, contradictions; or null"
+  },
+
   "entities": [
     {
       "entity_type": "person|location|vehicle|phone|username|organization",
@@ -173,6 +180,20 @@ evidence reached the relevant national database. Use these states:
   red flag and a productive next-step suggestion.
 - not_collected: no records were taken (or remains were not suitable).
 - unknown: cannot tell from the source. Default when unsure — do not guess.
+
+REPORTER — first responder analysis. Who filed the missing-person report
+matters because the first reporter is sometimes the last person to see the
+subject alive, and any lag between last contact and the report is its own
+signal:
+- relationship: prefer the most specific match. If the source says
+  "boyfriend reported" use partner. If "estranged husband", use ex_partner.
+  Use unknown when the source does not specify.
+- hours_to_report: extract from phrases like "missed work the next morning"
+  (use 12-24h), "wasn't reported for three days" (72h). Null when not
+  stated.
+- concerns: any notable reporting facts — non-family reporter when family
+  was nearby, multi-day lag, conflicting accounts of last contact, the
+  reporter is also the last-known-contact. Null when nothing stands out.
 
 - Return only the JSON object, no markdown fences.
 
