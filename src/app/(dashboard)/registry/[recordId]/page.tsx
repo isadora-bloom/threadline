@@ -304,6 +304,21 @@ export default async function RegistryProfilePage({
   const photoUrls = (((record as unknown as { photo_urls?: string[] | null }).photo_urls ?? []) as string[])
     .filter(u => typeof u === 'string' && u.length > 0)
 
+  // Weather summary from Open-Meteo, populated by scripts/fetch-weather.ts.
+  // Cast through unknown for the same reason as photo_urls — types.ts hasn't
+  // been regenerated to include migration 043 yet.
+  type WeatherSummary = {
+    date: string
+    temp_max_f: number | null
+    temp_min_f: number | null
+    precip_in: number | null
+    snow_in: number | null
+    wind_max_mph: number | null
+    severity: 'none' | 'mild' | 'notable' | 'severe'
+    notes: string[]
+  }
+  const weather = (record as unknown as { weather_at_event?: WeatherSummary | null }).weather_at_event ?? null
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       {/* Breadcrumb */}
@@ -441,6 +456,27 @@ export default async function RegistryProfilePage({
             })()}
           </span>
           <span className="text-[10px] text-slate-400 flex-shrink-0">last 72h</span>
+        </div>
+      )}
+
+      {/* Weather at event — surface only when the AI severity tag is
+          notable or worse, otherwise it's noise. */}
+      {weather && (weather.severity === 'severe' || weather.severity === 'notable') && (
+        <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
+          weather.severity === 'severe' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'
+        }`}>
+          <Calendar className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <span className="font-semibold">
+              {weather.severity === 'severe' ? 'Severe weather' : 'Notable weather'} on {weather.date}:
+            </span>{' '}
+            {weather.notes.length > 0 ? weather.notes.join(', ') : 'see details'}
+            {(weather.temp_max_f !== null || weather.temp_min_f !== null) && (
+              <span className="ml-1 opacity-70">
+                · {weather.temp_min_f !== null ? Math.round(weather.temp_min_f) : '?'}–{weather.temp_max_f !== null ? Math.round(weather.temp_max_f) : '?'}°F
+              </span>
+            )}
+          </div>
         </div>
       )}
 

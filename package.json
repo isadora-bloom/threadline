@@ -29,6 +29,7 @@
     "ai:reporter": "npx tsx scripts/reporter-flag.ts",
     "ai:offender-drift": "npx tsx scripts/offender-drift-flag.ts",
     "scrape:namus-photos": "npx tsx scripts/scrape-namus-photos.ts",
+    "fetch:weather": "npx tsx scripts/fetch-weather.ts",
     "pipeline:match": "npx tsx scripts/rule-based-match.ts",
     "pipeline:extract": "npx tsx scripts/ai-targeted-extract.ts",
     "pipeline:patterns": "npx tsx scripts/ai-pattern-analysis.ts",

@@ -3,7 +3,7 @@
 -- =============================================================================
 --
 -- Run this against your Supabase database (psql, the SQL editor in the
--- dashboard, or Supabase CLI) to apply migrations 031 through 042 in order.
+-- dashboard, or Supabase CLI) to apply migrations 031 through 043 in order.
 --
 -- Each migration is emitted verbatim and relies on the IF NOT EXISTS /
 -- DROP IF EXISTS guards it already carries. Re-running is therefore safe
@@ -19,20 +19,24 @@
 --
 -- After this script runs:
 --
---   - npm run ai:embed            (voyage-3 embeddings; needs VOYAGE_API_KEY)
---   - npm run ai:semantic         (nearest-neighbor flagger)
---   - npm run ai:associates       (named-associate / vehicle cross-match)
---   - npm run ai:temporal         (state x month/weekday clustering)
---   - npm run ai:misclass         (misclassification candidates)
---   - npm run ai:changes          (classification-change flagger; after 036)
---   - npm run ai:dq               (data-quality dupe + stale flags)
---   - npm run ai:connections      (populates ai_summary on global_connections)
---   - npm run ai:link-charley     (Charley <-> NamUs sibling links; after 041)
---   - npm run ai:negative-space   (under-reporting state flagger)
---   - npm run ai:evidence-gap     (NCIC/CODIS not entered)
---   - npm run ai:reporter         (reporter-pattern flagger)
---   - npm run ai:offender-drift   (offender geographic drift)
---   - npm run scrape:namus-photos (photo URLs for NamUs records; after 042)
+--   - npm run ai:embed             (voyage-3 embeddings; needs VOYAGE_API_KEY)
+--   - npm run ai:semantic          (nearest-neighbor flagger)
+--   - npm run ai:associates        (named-associate / vehicle cross-match)
+--   - npm run ai:temporal          (state x month/weekday clustering)
+--   - npm run ai:misclass          (misclassification candidates)
+--   - npm run ai:changes           (classification-change flagger; after 036)
+--   - npm run ai:dq                (data-quality dupe + stale flags)
+--   - npm run ai:connections       (populates ai_summary on global_connections)
+--   - npm run ai:link-charley      (Charley <-> NamUs sibling links; after 041)
+--   - npm run ai:negative-space    (under-reporting state flagger)
+--   - npm run ai:evidence-gap      (NCIC/CODIS not entered)
+--   - npm run ai:reporter          (reporter-pattern flagger)
+--   - npm run ai:offender-drift    (offender geographic drift)
+--   - npm run scrape:namus-photos  (photo URLs for NamUs records; after 042)
+--   - npm run fetch:weather        (Open-Meteo weather at event date; after 043)
+--
+-- Tip: run ai:batch first on any new records so the prompt fields the
+-- evidence-gap and reporter flaggers depend on are populated.
 --
 -- =============================================================================
 
@@ -637,3 +641,34 @@ COMMENT ON COLUMN import_records.photos_fetched_at IS 'When the photo URLs were 
 CREATE INDEX IF NOT EXISTS idx_import_records_photos_fetched
   ON import_records(photos_fetched_at)
   WHERE photos_fetched_at IS NULL;
+
+
+-- ##########################################################################
+-- ## 043_weather_at_event.sql
+-- ##########################################################################
+
+-- =============================================================================
+-- 043: Weather at event
+--
+-- Extreme weather is its own axis of evidence. Major storms cover
+-- abductions (witnesses indoors, reports delayed); cold-snap deaths look
+-- different from warm-weather accidents; a Christmas-Eve blizzard rewrites
+-- what a "last seen near home" report can mean. Until now Threadline knew
+-- the date and the city but never asked what the weather was that day.
+--
+-- This adds two fields to import_records: a JSONB summary of conditions on
+-- the relevant date (from Open-Meteo Archive), and a fetched-at timestamp
+-- so the scraper knows what to revisit. Open-Meteo is free and key-less so
+-- we avoid the bandwidth/storage of a per-record cache table.
+-- =============================================================================
+
+ALTER TABLE import_records
+  ADD COLUMN IF NOT EXISTS weather_at_event JSONB,
+  ADD COLUMN IF NOT EXISTS weather_fetched_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN import_records.weather_at_event IS 'Open-Meteo daily summary for the event date at the record location. Shape: { date, temp_max_f, temp_min_f, precip_in, snow_in, wind_max_mph, weathercode, severity, notes }.';
+COMMENT ON COLUMN import_records.weather_fetched_at IS 'When weather_at_event was last populated. Null = never fetched.';
+
+CREATE INDEX IF NOT EXISTS idx_import_records_weather_pending
+  ON import_records(weather_fetched_at)
+  WHERE weather_fetched_at IS NULL;
