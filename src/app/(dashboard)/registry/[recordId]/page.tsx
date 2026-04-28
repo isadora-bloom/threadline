@@ -298,6 +298,12 @@ export default async function RegistryProfilePage({
 
   const source = record.source as { display_name: string; slug: string; base_url: string } | null
 
+  // Cast through unknown because the Supabase types file was generated
+  // before migration 042 added photo_urls; until types.ts is regenerated
+  // the field is not reflected in the row type.
+  const photoUrls = (((record as unknown as { photo_urls?: string[] | null }).photo_urls ?? []) as string[])
+    .filter(u => typeof u === 'string' && u.length > 0)
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       {/* Breadcrumb */}
@@ -434,6 +440,28 @@ export default async function RegistryProfilePage({
             })()}
           </span>
           <span className="text-[10px] text-slate-400 flex-shrink-0">last 72h</span>
+        </div>
+      )}
+
+      {/* Photos — proxied through /api/photo-proxy so the source server sees
+          our user agent and the browser does not hot-link cross-origin. */}
+      {photoUrls.length > 0 && (
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          {photoUrls.slice(0, 8).map((u, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={`/api/photo-proxy?url=${encodeURIComponent(u)}`}
+              alt={`${record.person_name ?? 'Subject'} — photo ${i + 1}`}
+              loading="lazy"
+              className="h-44 w-auto rounded-md border border-slate-200 object-cover bg-slate-100 flex-shrink-0"
+            />
+          ))}
+          {photoUrls.length > 8 && (
+            <div className="flex items-center justify-center h-44 px-4 rounded-md border border-dashed border-slate-200 text-xs text-slate-400">
+              +{photoUrls.length - 8} more
+            </div>
+          )}
         </div>
       )}
 

@@ -3,7 +3,7 @@
 -- =============================================================================
 --
 -- Run this against your Supabase database (psql, the SQL editor in the
--- dashboard, or Supabase CLI) to apply migrations 031 through 041 in order.
+-- dashboard, or Supabase CLI) to apply migrations 031 through 042 in order.
 --
 -- Each migration is emitted verbatim and relies on the IF NOT EXISTS /
 -- DROP IF EXISTS guards it already carries. Re-running is therefore safe
@@ -19,15 +19,20 @@
 --
 -- After this script runs:
 --
---   - npm run ai:embed          (voyage-3 embeddings; needs VOYAGE_API_KEY)
---   - npm run ai:semantic       (nearest-neighbor flagger)
---   - npm run ai:associates     (named-associate / vehicle cross-match)
---   - npm run ai:temporal       (state x month/weekday clustering)
---   - npm run ai:misclass       (misclassification candidates)
---   - npm run ai:changes        (classification-change flagger; after 036)
---   - npm run ai:dq             (data-quality dupe + stale flags)
---   - npm run ai:connections    (populates ai_summary on global_connections)
---   - npm run ai:link-charley   (Charley <-> NamUs sibling links; after 041)
+--   - npm run ai:embed            (voyage-3 embeddings; needs VOYAGE_API_KEY)
+--   - npm run ai:semantic         (nearest-neighbor flagger)
+--   - npm run ai:associates       (named-associate / vehicle cross-match)
+--   - npm run ai:temporal         (state x month/weekday clustering)
+--   - npm run ai:misclass         (misclassification candidates)
+--   - npm run ai:changes          (classification-change flagger; after 036)
+--   - npm run ai:dq               (data-quality dupe + stale flags)
+--   - npm run ai:connections      (populates ai_summary on global_connections)
+--   - npm run ai:link-charley     (Charley <-> NamUs sibling links; after 041)
+--   - npm run ai:negative-space   (under-reporting state flagger)
+--   - npm run ai:evidence-gap     (NCIC/CODIS not entered)
+--   - npm run ai:reporter         (reporter-pattern flagger)
+--   - npm run ai:offender-drift   (offender geographic drift)
+--   - npm run scrape:namus-photos (photo URLs for NamUs records; after 042)
 --
 -- =============================================================================
 
@@ -604,3 +609,31 @@ CREATE POLICY "siblings_delete" ON record_siblings
   FOR DELETE TO service_role USING (true);
 
 COMMENT ON TABLE record_siblings IS 'Pairwise links between import_records identified as the same case across different registries (NamUs/Doe Network/Charley Project).';
+
+
+-- ##########################################################################
+-- ## 042_record_photos.sql
+-- ##########################################################################
+
+-- =============================================================================
+-- 042: Record photos
+--
+-- NamUs case-detail responses carry an `images` array. Until now we ignored
+-- it, so every registry profile was a wall of text without a face. Adding
+-- a photo column does not download the images — it stores the source URLs
+-- and lets the UI fetch them through a server-side proxy that hot-links
+-- with the right User-Agent and only allows known-source domains. This is
+-- enough to put faces on profiles without taking on storage cost or
+-- bandwidth bills.
+-- =============================================================================
+
+ALTER TABLE import_records
+  ADD COLUMN IF NOT EXISTS photo_urls TEXT[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS photos_fetched_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN import_records.photo_urls IS 'Public URLs to the original-size source photos. The UI proxies these through /api/photo-proxy so the source server sees the right User-Agent and CORS works.';
+COMMENT ON COLUMN import_records.photos_fetched_at IS 'When the photo URLs were last refreshed. Null = never; old = candidate for re-fetch.';
+
+CREATE INDEX IF NOT EXISTS idx_import_records_photos_fetched
+  ON import_records(photos_fetched_at)
+  WHERE photos_fetched_at IS NULL;
