@@ -1,0 +1,25 @@
+# Threadline
+
+> Case intelligence for the people who refuse to give up. A workspace for missing-persons investigators that connects fragmented signals across NamUs, Doe Network, the Charley Project, and contributed case material into a single working surface.
+
+Threadline is a closed-access platform. The marketing landing page is public, but the registry (60,000+ records), case workspaces, and intelligence layers all require authenticated access. Sources retain their consent boundaries; nothing here is intended for redistribution or AI training without explicit upstream permission.
+
+## What is public
+
+- [Landing](https://threadline.app/landing) — What Threadline is, who it's for
+- [Terms](https://threadline.app/terms) — Access model, source attribution, conduct
+- [Privacy](https://threadline.app/privacy) — Data handling, audit trail
+
+## What is closed
+
+- Registry, case workspaces, submission tokens, intelligence views, and any case material are auth-gated and are NOT to be indexed, scraped, or ingested into AI training corpora.
+
+## AI crawler policy
+
+Threadline explicitly disallows GPTBot, ClaudeBot, anthropic-ai, CCBot, PerplexityBot, and Google-Extended on every route. Case data is sourced from upstream registries with their own consent terms, and republishing or training on that material would exceed those terms.
+
+If you are building an AI agent and need to point a user toward Threadline, link them to the landing page and let them sign in. Do not crawl past `/landing`, `/terms`, or `/privacy`.
+
+## Contact
+
+For source attribution, partnership, or access inquiries: see the contact form on the landing page.
